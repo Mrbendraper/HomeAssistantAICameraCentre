@@ -1,0 +1,290 @@
+"""Camera analysis pipeline for AI Camera Centre.
+
+One CameraPipeline per configured camera. On a motion trigger (or the
+ai_camera_centre.analyze service) it captures a burst of snapshots,
+sends them to an AI Task entity for analysis, archives the alert and
+fires the configured mobile notifications. This is the built-in
+replacement for the shared YAML script earlier versions required.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+import time
+from typing import TYPE_CHECKING, Any
+
+from homeassistant.components import camera
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+from .const import (
+    CONF_AI_TASK_ENTITY,
+    CONF_CAMERA_ENTITY,
+    CONF_CAMERA_NAME,
+    CONF_COOLDOWN_SECONDS,
+    CONF_DASHBOARD_PATH,
+    CONF_MIN_NOTIFY_SCORE,
+    CONF_NOTIFY_SERVICES,
+    CONF_SCENE_CONTEXT,
+    CONF_SNAPSHOT_COUNT,
+    CONF_SNAPSHOT_INTERVAL_MS,
+    DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_DASHBOARD_PATH,
+    DEFAULT_MIN_NOTIFY_SCORE,
+    DEFAULT_SNAPSHOT_COUNT,
+    DEFAULT_SNAPSHOT_INTERVAL_MS,
+    DOMAIN,
+    SIGNAL_NEW_ALERT,
+)
+
+if TYPE_CHECKING:
+    from . import AlertStore
+
+_LOGGER = logging.getLogger(__name__)
+
+NO_MOTION_MARKER = "no obvious motion detected"
+
+DEFAULT_SCENE_CONTEXT = (
+    "No additional scene context was provided for this camera. If no gate "
+    'is visible in the images, use "n/a" for gate_state and gate_risk.'
+)
+
+PROMPT_TEMPLATE = """\
+Motion has been detected by a camera at a residential property. You are being
+shown {count} images taken {interval} apart, in chronological order. Compare
+the images and describe what caused the motion.
+
+SCENE CONTEXT: {scene_context}
+
+Determine direction of travel using ONLY the apparent size change of the
+subject across the frames: Subject appears LARGER in later frames = moving
+TOWARD the camera = "towards house" (approaching). Subject appears SMALLER in
+later frames = moving AWAY FROM the camera = "away from house" (leaving).
+Cannot determine = "unknown".
+
+Analyse the images and respond ONLY with a valid JSON object with these
+fields: "short": A single sentence of maximum 80 characters for a phone
+notification banner. If suspicious_index is 6 or above, start with
+"⚠️ ALERT: ". "detail": A 2-3 sentence description including appearance,
+direction of movement, what they are carrying or doing, and any notable
+behaviour. "direction": One of "towards house", "away from house",
+"stationary", or "unknown". "carrying": Brief description of anything being
+carried or held, or "nothing visible". "activity": Brief description of what
+the subject appears to be doing, e.g. "walking towards the house", "standing
+at the gate", "running", "loitering". "gate_state": One of "open", "closed",
+or "unknown". If the scene context states there is no gate, use "n/a".
+"gate_risk": A brief sentence assessing whether the gate state combined with
+the detected motion poses a risk, e.g. an open gate with an animal nearby, or
+a closed gate being approached by a person. If the scene context states there
+is no gate, use "n/a". "suspicious_index": A number from 1 to 10. 1 =
+completely benign (e.g. a cat walking past). 10 = highly suspicious (e.g. a
+person in dark clothing with tools approaching the house at night). Consider
+direction, activity, what is being carried, time of day, and gate state when
+scoring. If you see no obvious cause of motion, respond with: {{"short": "No
+obvious motion detected", "detail": "No obvious motion detected",
+"direction": "unknown", "carrying": "unknown", "activity": "unknown",
+"gate_state": "<open or closed if a gate is visible, otherwise n/a>",
+"gate_risk": "<assess the gate risk if a gate is visible, otherwise n/a>",
+"suspicious_index": 1}}. Only use "gate_state": "unknown" if the scene has a
+gate but it is not visible in the images. Do not include any text outside the
+JSON object."""
+
+
+def _write_file(path: str, data: bytes) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(data)
+
+
+def _parse_ai_result(raw: Any) -> dict[str, Any]:
+    """Normalise an ai_task response into the alert field dict."""
+    if isinstance(raw, str):
+        cleaned = re.sub(r"```(?:json)?", "", raw).strip()
+        raw = json.loads(cleaned)
+    if not isinstance(raw, dict):
+        raise HomeAssistantError(f"Unexpected AI response type: {type(raw).__name__}")
+    try:
+        score = int(float(raw.get("suspicious_index", 1)))
+    except (TypeError, ValueError):
+        score = 1
+    return {
+        "score": min(10, max(1, score)),
+        "short": str(raw.get("short", "")),
+        "detail": str(raw.get("detail", "")),
+        "direction": str(raw.get("direction", "unknown")),
+        "carrying": str(raw.get("carrying", "unknown")),
+        "activity": str(raw.get("activity", "unknown")),
+        "gate_state": str(raw.get("gate_state", "n/a")),
+        "gate_risk": str(raw.get("gate_risk", "n/a")),
+    }
+
+
+class CameraPipeline:
+    """Snapshot burst -> AI analysis -> alert log -> notification."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        store: "AlertStore",
+        global_options: dict[str, Any],
+        camera_id: str,
+        camera_conf: dict[str, Any],
+    ) -> None:
+        self.hass = hass
+        self.store = store
+        self.camera_id = camera_id
+        self.label = camera_conf.get(CONF_CAMERA_NAME) or camera_id.replace(
+            "_", " "
+        ).title()
+        self.camera_entity = camera_conf[CONF_CAMERA_ENTITY]
+        self.scene_context = (
+            camera_conf.get(CONF_SCENE_CONTEXT) or DEFAULT_SCENE_CONTEXT
+        )
+        self.snapshot_count = int(
+            global_options.get(CONF_SNAPSHOT_COUNT, DEFAULT_SNAPSHOT_COUNT)
+        )
+        self.snapshot_interval = (
+            int(
+                global_options.get(
+                    CONF_SNAPSHOT_INTERVAL_MS, DEFAULT_SNAPSHOT_INTERVAL_MS
+                )
+            )
+            / 1000
+        )
+        self.cooldown = int(
+            global_options.get(CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS)
+        )
+        self.min_notify_score = int(
+            global_options.get(CONF_MIN_NOTIFY_SCORE, DEFAULT_MIN_NOTIFY_SCORE)
+        )
+        self.notify_services = [
+            s.strip()
+            for s in str(global_options.get(CONF_NOTIFY_SERVICES, "")).split(",")
+            if s.strip()
+        ]
+        self.dashboard_path = global_options.get(
+            CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH
+        )
+        self.ai_task_entity = global_options.get(CONF_AI_TASK_ENTITY)
+        self._lock = asyncio.Lock()
+        self._last_run = 0.0
+
+    # -- triggering ------------------------------------------------------
+
+    @callback
+    def handle_motion_event(self, event: Event) -> None:
+        """State-change listener for the configured motion entity."""
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        if new_state is None or new_state.state != "on":
+            return
+        if old_state is not None and old_state.state == "on":
+            return
+        self.hass.async_create_task(self.async_analyze())
+
+    async def async_analyze(self, force: bool = False) -> None:
+        """Run the pipeline, respecting the per-camera cooldown."""
+        if self._lock.locked():
+            _LOGGER.debug("%s: analysis already running, skipping", self.camera_id)
+            return
+        async with self._lock:
+            if not force and time.monotonic() - self._last_run < self.cooldown:
+                _LOGGER.debug("%s: within cooldown, skipping", self.camera_id)
+                return
+            self._last_run = time.monotonic()
+            try:
+                await self._run()
+            except Exception:  # noqa: BLE001 - never break the listener
+                _LOGGER.exception("%s: camera analysis failed", self.camera_id)
+
+    # -- pipeline steps ---------------------------------------------------
+
+    async def _run(self) -> None:
+        paths = await self._capture_frames()
+        report = await self._analyze_frames(paths)
+        if NO_MOTION_MARKER in report["short"].lower():
+            _LOGGER.debug("%s: AI saw no significant motion", self.camera_id)
+            return
+        record = await self.store.async_log(
+            {
+                "camera_id": self.camera_id,
+                "camera_label": self.label,
+                "image_path": paths[len(paths) // 2],
+                **report,
+            }
+        )
+        async_dispatcher_send(self.hass, SIGNAL_NEW_ALERT, record)
+        if report["score"] >= self.min_notify_score:
+            await self._notify(report, record)
+
+    async def _capture_frames(self) -> list[str]:
+        paths: list[str] = []
+        for i in range(1, self.snapshot_count + 1):
+            image = await camera.async_get_image(self.hass, self.camera_entity)
+            path = os.path.join(
+                self.store.snapshots_dir, f"{self.camera_id}_{i}.jpg"
+            )
+            await self.hass.async_add_executor_job(_write_file, path, image.content)
+            paths.append(path)
+            if i < self.snapshot_count:
+                await asyncio.sleep(self.snapshot_interval)
+        return paths
+
+    async def _analyze_frames(self, paths: list[str]) -> dict[str, Any]:
+        interval = (
+            f"{self.snapshot_interval:g} second"
+            f"{'s' if self.snapshot_interval != 1 else ''}"
+        )
+        service_data: dict[str, Any] = {
+            "task_name": f"{self.label} analysis",
+            "instructions": PROMPT_TEMPLATE.format(
+                count=len(paths),
+                interval=interval,
+                scene_context=self.scene_context,
+            ),
+            "attachments": [
+                {
+                    "media_content_id": (
+                        f"media-source://{DOMAIN}/snapshots/{os.path.basename(p)}"
+                    ),
+                    "media_content_type": "image/jpeg",
+                }
+                for p in paths
+            ],
+        }
+        if self.ai_task_entity:
+            service_data["entity_id"] = self.ai_task_entity
+        result = await self.hass.services.async_call(
+            "ai_task",
+            "generate_data",
+            service_data,
+            blocking=True,
+            return_response=True,
+        )
+        if not isinstance(result, dict) or "data" not in result:
+            raise HomeAssistantError(f"Unexpected ai_task response: {result!r}")
+        return _parse_ai_result(result["data"])
+
+    async def _notify(self, report: dict[str, Any], record: dict[str, Any]) -> None:
+        for target in self.notify_services:
+            service = target.removeprefix("notify.")
+            try:
+                await self.hass.services.async_call(
+                    "notify",
+                    service,
+                    {
+                        "title": f"{self.label} Motion [{report['score']}/10]",
+                        "message": report["short"],
+                        "data": {
+                            "image": record["image"],
+                            "clickAction": self.dashboard_path,
+                        },
+                    },
+                    blocking=False,
+                )
+            except Exception:  # noqa: BLE001 - one bad target must not stop others
+                _LOGGER.exception("%s: notify %s failed", self.camera_id, target)

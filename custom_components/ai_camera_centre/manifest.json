@@ -1,0 +1,15 @@
+{
+  "domain": "ai_camera_centre",
+  "name": "AI Camera Centre",
+  "codeowners": ["@Mrbendraper"],
+  "config_flow": true,
+  "dependencies": ["http", "websocket_api", "camera", "ai_task", "media_source"],
+  "after_dependencies": ["lovelace"],
+  "documentation": "https://github.com/Mrbendraper/HomeAssistantAICameraCentre",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Mrbendraper/HomeAssistantAICameraCentre/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "2.0.0"
+}

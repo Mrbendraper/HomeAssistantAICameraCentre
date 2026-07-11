@@ -1,14 +1,14 @@
-/* Alert History Card (bundled with the alert_history integration)
+/* AI Camera Centre Card (bundled with the ai_camera_centre integration)
  * Shows a rolling multi-camera AI alert timeline fetched over the
  * Home Assistant websocket API.
  *
  * Config:
- *   type: custom:alert-history-card
+ *   type: custom:ai-camera-centre-card
  *   title: Camera Alerts   (optional)
  *   days: 7                (optional client-side window, default 7)
  */
 
-class AlertHistoryCard extends HTMLElement {
+class AICameraCentreCard extends HTMLElement {
   static getStubConfig() {
     return { title: "Camera Alerts", days: 7 };
   }
@@ -43,7 +43,7 @@ class AlertHistoryCard extends HTMLElement {
   async _load() {
     if (!this._hass) return;
     try {
-      const resp = await this._hass.callWS({ type: "alert_history/alerts" });
+      const resp = await this._hass.callWS({ type: "ai_camera_centre/alerts" });
       const cutoff = Date.now() / 1000 - this._config.days * 86400;
       this._alerts = (resp.alerts || [])
         .filter((r) => Number(r.ts) >= cutoff)
@@ -296,10 +296,14 @@ class AlertHistoryCard extends HTMLElement {
   }
 }
 
-customElements.define("alert-history-card", AlertHistoryCard);
+customElements.define("ai-camera-centre-card", AICameraCentreCard);
+// Legacy alias so dashboards created before the rename keep working.
+if (!customElements.get("alert-history-card")) {
+  customElements.define("alert-history-card", class extends AICameraCentreCard {});
+}
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "alert-history-card",
-  name: "Alert History Card",
-  description: "Rolling multi-camera AI alert timeline (alert_history integration)",
+  type: "ai-camera-centre-card",
+  name: "AI Camera Centre Card",
+  description: "Rolling multi-camera AI alert timeline (ai_camera_centre integration)",
 });

@@ -1,8 +1,26 @@
+analyze:
+  name: Analyze camera now
+  description: >-
+    Immediately run the built-in pipeline for a configured camera: snapshot
+    burst, AI analysis, alert logging and notification. Useful for testing a
+    camera's setup or triggering from your own automations.
+  fields:
+    camera_id:
+      name: Camera ID
+      description: The id of a camera configured in AI Camera Centre (the
+        slugified camera name, e.g. "side_gate" for "Side Gate")
+      required: true
+      example: side_gate
+      selector:
+        text: null
+
 log_alert:
   name: Log alert
   description: >-
-    Archive an alert image and append the AI report to the alert history.
-    Optionally returns the archived image URL for use in notifications.
+    Advanced: archive an alert image and append an externally-produced AI
+    report to the alert history. Only needed if you run your own analysis
+    script instead of the built-in pipeline. Optionally returns the archived
+    image URL for use in notifications.
   fields:
     camera_id:
       name: Camera ID

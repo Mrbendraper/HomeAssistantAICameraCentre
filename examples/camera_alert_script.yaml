@@ -1,4 +1,4 @@
-# Example: shared multi-camera script using alert_history.log_alert
+# Example: shared multi-camera script using ai_camera_centre.log_alert
 #
 # Call from per-camera automations, e.g.:
 #
@@ -22,12 +22,12 @@
 #       dashboard_path: /lovelace/alerts
 #       scene_context: >-
 #         The camera overlooks the enclosed back garden of the house. There
-#         is NO gate in this scene — set gate_state and gate_risk to "n/a".
+#         is NO gate in this scene â€” set gate_state and gate_risk to "n/a".
 
 alias: Camera - Snapshot, AI & Alert
 description: >-
   Shared multi-camera motion analysis. Takes 5 snapshots, runs AI review,
-  logs the alert to Alert History, and notifies.
+  logs the alert to AI Camera Centre, and notifies.
 fields:
   camera_id:
     name: Camera ID
@@ -99,7 +99,7 @@ sequence:
         Analyse the images and respond ONLY with a valid JSON object with
         these fields: "short": A single sentence of maximum 80 characters for
         a phone notification banner. If suspicious_index is 6 or above, start
-        with "⚠️ ALERT: ". "detail": A 2-3 sentence description including
+        with "âš ï¸ ALERT: ". "detail": A 2-3 sentence description including
         appearance, direction of movement, what they are carrying or doing,
         and any notable behaviour. "direction": One of "towards house", "away
         from house", "stationary", or "unknown". "carrying": Brief
@@ -154,7 +154,7 @@ sequence:
     then:
       - stop: No significant motion
     else:
-      - action: alert_history.log_alert
+      - action: ai_camera_centre.log_alert
         response_variable: logged
         data:
           camera_id: "{{ camera_id }}"

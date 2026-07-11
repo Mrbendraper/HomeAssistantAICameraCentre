@@ -1,7 +1,9 @@
-"""The Alert History integration.
+"""The AI Camera Centre integration.
 
-Persists AI camera alert reports and images, exposes them over a
-websocket API for the bundled Lovelace card, and prunes old records.
+Self-contained AI camera alerting: configure cameras (stream + motion
+trigger + scene context) in the UI and the integration captures snapshot
+bursts, runs AI analysis via ai_task, persists alert reports and images,
+notifies your devices, and serves a bundled Lovelace timeline card.
 """
 from __future__ import annotations
 
@@ -28,15 +30,24 @@ from homeassistant.core import (
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 
+from .analyzer import CameraPipeline
 from .const import (
     CARD_URL,
+    CONF_CAMERAS,
+    CONF_MOTION_ENTITY,
     CONF_RETENTION_DAYS,
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
     IMAGES_URL,
+    LEGACY_IMAGES_URL,
+    LEGACY_STORAGE_DIR,
     SIGNAL_NEW_ALERT,
+    SNAPSHOTS_URL,
     STORAGE_DIR,
     VERSION,
 )
@@ -47,6 +58,8 @@ PLATFORMS = ["sensor"]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 SERVICE_LOG_ALERT = "log_alert"
+SERVICE_ANALYZE = "analyze"
+
 LOG_ALERT_SCHEMA = vol.Schema(
     {
         vol.Required("camera_id"): cv.slug,
@@ -63,6 +76,8 @@ LOG_ALERT_SCHEMA = vol.Schema(
     }
 )
 
+ANALYZE_SCHEMA = vol.Schema({vol.Required("camera_id"): cv.slug})
+
 
 class AlertStore:
     """In-memory + on-disk (JSONL) store for alert records."""
@@ -71,6 +86,7 @@ class AlertStore:
         self.hass = hass
         self.base_dir = base_dir
         self.images_dir = os.path.join(base_dir, "images")
+        self.snapshots_dir = os.path.join(base_dir, "snapshots")
         self.log_path = os.path.join(base_dir, "alerts.jsonl")
         self.retention_days = retention_days
         self.records: list[dict[str, Any]] = []
@@ -84,6 +100,7 @@ class AlertStore:
 
     def _load_sync(self) -> list[dict[str, Any]]:
         os.makedirs(self.images_dir, exist_ok=True)
+        os.makedirs(self.snapshots_dir, exist_ok=True)
         records: list[dict[str, Any]] = []
         if os.path.exists(self.log_path):
             with open(self.log_path, encoding="utf-8") as fh:
@@ -92,9 +109,13 @@ class AlertStore:
                     if not line:
                         continue
                     try:
-                        records.append(json.loads(line))
+                        record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    image = record.get("image", "")
+                    if image.startswith(LEGACY_IMAGES_URL):
+                        record["image"] = IMAGES_URL + image[len(LEGACY_IMAGES_URL):]
+                    records.append(record)
         return records
 
     def _append_sync(self, record: dict[str, Any], src: str, dest: str) -> None:
@@ -179,6 +200,14 @@ class AlertStore:
         return cams
 
 
+def _migrate_legacy_dir_sync(old_dir: str, new_dir: str) -> bool:
+    """Move the pre-rename alert_history data directory if present."""
+    if os.path.isdir(old_dir) and not os.path.isdir(new_dir):
+        shutil.move(old_dir, new_dir)
+        return True
+    return False
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/alerts"})
 @websocket_api.async_response
 async def ws_list_alerts(
@@ -211,16 +240,22 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         _LOGGER.info("Registered Lovelace resource %s", CARD_URL)
     except Exception:  # noqa: BLE001 - YAML-mode dashboards, API changes
         _LOGGER.warning(
-            "Could not auto-register the Alert History card. Add it manually: "
+            "Could not auto-register the AI Camera Centre card. Add it manually: "
             "Settings > Dashboards > Resources > Add > URL: %s, type: module",
             CARD_URL,
         )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Alert History from a config entry."""
+    """Set up AI Camera Centre from a config entry."""
     retention = entry.options.get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS)
     base_dir = hass.config.path(STORAGE_DIR)
+    legacy_dir = hass.config.path(LEGACY_STORAGE_DIR)
+    if await hass.async_add_executor_job(
+        _migrate_legacy_dir_sync, legacy_dir, base_dir
+    ):
+        _LOGGER.info("Migrated alert data from %s to %s", legacy_dir, base_dir)
+
     store = AlertStore(hass, base_dir, retention)
     await store.async_load()
     await store.async_prune()
@@ -230,15 +265,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Static paths and websocket command survive reloads; register once.
     if not hass.data[DOMAIN].get("http_registered"):
-        card_path = os.path.join(os.path.dirname(__file__), "www", "alert-history-card.js")
+        card_path = os.path.join(
+            os.path.dirname(__file__), "www", "ai-camera-centre-card.js"
+        )
         await hass.http.async_register_static_paths(
             [
                 StaticPathConfig(IMAGES_URL, store.images_dir, False),
+                StaticPathConfig(SNAPSHOTS_URL, store.snapshots_dir, False),
                 StaticPathConfig(CARD_URL, card_path, True),
             ]
         )
         websocket_api.async_register_command(hass, ws_list_alerts)
         hass.data[DOMAIN]["http_registered"] = True
+
+    # -- built-in analysis pipelines -----------------------------------
+    pipelines: dict[str, CameraPipeline] = {}
+    for camera_id, camera_conf in entry.options.get(CONF_CAMERAS, {}).items():
+        pipeline = CameraPipeline(
+            hass, store, dict(entry.options), camera_id, dict(camera_conf)
+        )
+        pipelines[camera_id] = pipeline
+        if motion_entity := camera_conf.get(CONF_MOTION_ENTITY):
+            entry.async_on_unload(
+                async_track_state_change_event(
+                    hass, [motion_entity], pipeline.handle_motion_event
+                )
+            )
+    hass.data[DOMAIN]["pipelines"] = pipelines
 
     async def handle_log_alert(call: ServiceCall) -> ServiceResponse:
         record = await store.async_log(dict(call.data))
@@ -247,12 +300,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return {"image_url": record["image"], "ts": record["ts"]}
         return None
 
+    async def handle_analyze(call: ServiceCall) -> None:
+        camera_id = call.data["camera_id"]
+        pipeline = hass.data[DOMAIN]["pipelines"].get(camera_id)
+        if pipeline is None:
+            raise HomeAssistantError(
+                f"No camera '{camera_id}' is configured in AI Camera Centre "
+                f"(configured: {', '.join(hass.data[DOMAIN]['pipelines']) or 'none'})"
+            )
+        await pipeline.async_analyze(force=True)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_LOG_ALERT,
         handle_log_alert,
         schema=LOG_ALERT_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_ANALYZE, handle_analyze, schema=ANALYZE_SCHEMA
     )
 
     entry.async_on_unload(
@@ -274,5 +340,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.services.async_remove(DOMAIN, SERVICE_LOG_ALERT)
+        hass.services.async_remove(DOMAIN, SERVICE_ANALYZE)
         hass.data[DOMAIN].pop("store", None)
+        hass.data[DOMAIN].pop("pipelines", None)
     return unload_ok

@@ -1,4 +1,4 @@
-"""Sensor platform for Alert History.
+"""Sensor platform for AI Camera Centre.
 
 One sensor per camera: alert count in the last 24 hours, with details of
 the most recent alert as attributes. Sensors are created dynamically as
