@@ -1,0 +1,6 @@
+{
+  "services": {
+    "analyze": "mdi:cctv",
+    "log_alert": "mdi:notebook-plus-outline"
+  }
+}

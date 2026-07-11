@@ -1,4 +1,4 @@
-# AI Camera Centre
+<img src="assets/logo-wide.png" alt="AI Camera Centre" width="490">
 
 A self-contained Home Assistant custom integration (HACS-compatible) that
 turns your cameras into an AI-powered alerting system — no YAML scripts or
@@ -133,6 +133,40 @@ own script/automation and log results into the same history and card with
 `ai_camera_centre.log_alert` — see
 [`examples/camera_alert_script.yaml`](examples/camera_alert_script.yaml).
 
+## Troubleshooting
+
+**"Custom element doesn't exist: ai-camera-centre-card"** — the card's
+JavaScript isn't reaching your browser. Check, in order:
+
+1. *Is the integration serving it?* Open
+   `http://<ha-address>:8123/ai_camera_centre/ai-camera-centre-card.js` —
+   you should see JavaScript. A 404 means the integration isn't set up or
+   an old version is installed (HACS → Redownload, restart, and make sure
+   the integration entry exists under Devices & Services).
+2. *Is the resource registered?* Settings → Dashboards → ⋮ → Resources
+   (requires "Advanced mode" on your profile). There should be an entry for
+   `/ai_camera_centre/ai-camera-centre-card.js`; add it manually as a
+   **JavaScript module** if missing, and delete any stale
+   `/alert_history/...` entry.
+3. *Clear the frontend cache* — this is the usual culprit. Hard-refresh the
+   browser (Ctrl+F5); in the companion app: Settings → Companion App →
+   Debugging → **Reset frontend cache**.
+
+**No alerts are generated** — check Settings → System → Logs for
+`ai_camera_centre` errors. The most common cause is no AI Task provider:
+you need one configured (e.g. Google Generative AI or OpenAI) and either
+set as the default AI Task entity or selected in this integration's
+Settings.
+
+**Notifications don't arrive** — verify the alert target's minimum score
+isn't filtering the alert out, and that its camera filter (if any) includes
+the camera. Each delivery failure is logged.
+
+**No integration icon** — custom integration icons are served from the
+central [home-assistant/brands](https://github.com/home-assistant/brands)
+repository, not from this repo; see
+[docs/BRANDING.md](docs/BRANDING.md) for the one-time submission.
+
 ## Upgrading from Alert History (v1.x)
 
 The integration was renamed (`alert_history` → `ai_camera_centre`) in v2.0:
@@ -150,3 +184,6 @@ The integration was renamed (`alert_history` → `ai_camera_centre`) in v2.0:
    `VERSION` in `const.py` (keep them in sync)
 2. Commit, tag `vX.Y.Z`, push with tags
 3. Create a GitHub release from the tag — HACS offers the new version
+
+Brand assets (integration icon/logo) are documented in
+[docs/BRANDING.md](docs/BRANDING.md).
