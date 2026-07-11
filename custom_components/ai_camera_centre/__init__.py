@@ -38,9 +38,17 @@ from homeassistant.helpers.event import (
 from .analyzer import CameraPipeline
 from .const import (
     CARD_URL,
+    CONF_ALERT_TARGETS,
     CONF_CAMERAS,
+    CONF_MIN_NOTIFY_SCORE,
+    CONF_MOTION_ENTITIES,
     CONF_MOTION_ENTITY,
+    CONF_NOTIFY_SERVICES,
     CONF_RETENTION_DAYS,
+    CONF_TARGET_CAMERAS,
+    CONF_TARGET_MIN_SCORE,
+    CONF_TARGET_SERVICE,
+    DEFAULT_MIN_NOTIFY_SCORE,
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
     IMAGES_URL,
@@ -279,16 +287,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["http_registered"] = True
 
     # -- built-in analysis pipelines -----------------------------------
+    targets = [dict(t) for t in entry.options.get(CONF_ALERT_TARGETS, {}).values()]
+    if not targets and (legacy_notify := entry.options.get(CONF_NOTIFY_SERVICES)):
+        # Migrate the pre-2.1 comma-separated notify_services setting.
+        legacy_min = int(
+            entry.options.get(CONF_MIN_NOTIFY_SCORE, DEFAULT_MIN_NOTIFY_SCORE)
+        )
+        targets = [
+            {
+                CONF_TARGET_SERVICE: service.strip(),
+                CONF_TARGET_MIN_SCORE: legacy_min,
+                CONF_TARGET_CAMERAS: [],
+            }
+            for service in str(legacy_notify).split(",")
+            if service.strip()
+        ]
+
     pipelines: dict[str, CameraPipeline] = {}
     for camera_id, camera_conf in entry.options.get(CONF_CAMERAS, {}).items():
         pipeline = CameraPipeline(
-            hass, store, dict(entry.options), camera_id, dict(camera_conf)
+            hass, store, dict(entry.options), camera_id, dict(camera_conf), targets
         )
         pipelines[camera_id] = pipeline
-        if motion_entity := camera_conf.get(CONF_MOTION_ENTITY):
+        motion_entities = camera_conf.get(CONF_MOTION_ENTITIES) or []
+        if legacy_motion := camera_conf.get(CONF_MOTION_ENTITY):
+            # Pre-2.1 single-entity key.
+            if legacy_motion not in motion_entities:
+                motion_entities = [*motion_entities, legacy_motion]
+        if motion_entities:
             entry.async_on_unload(
                 async_track_state_change_event(
-                    hass, [motion_entity], pipeline.handle_motion_event
+                    hass, motion_entities, pipeline.handle_motion_event
                 )
             )
     hass.data[DOMAIN]["pipelines"] = pipelines

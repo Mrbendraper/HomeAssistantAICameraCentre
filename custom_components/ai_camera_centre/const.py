@@ -1,17 +1,18 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # -- global options ------------------------------------------------------
 CONF_RETENTION_DAYS = "retention_days"
 CONF_SNAPSHOT_COUNT = "snapshot_count"
 CONF_SNAPSHOT_INTERVAL_MS = "snapshot_interval_ms"
 CONF_COOLDOWN_SECONDS = "cooldown_seconds"
-CONF_MIN_NOTIFY_SCORE = "min_notify_score"
-CONF_NOTIFY_SERVICES = "notify_services"
 CONF_DASHBOARD_PATH = "dashboard_path"
 CONF_AI_TASK_ENTITY = "ai_task_entity"
+# legacy (pre-2.1, migrated to alert targets on setup)
+CONF_MIN_NOTIFY_SCORE = "min_notify_score"
+CONF_NOTIFY_SERVICES = "notify_services"
 
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_SNAPSHOT_COUNT = 5
@@ -24,8 +25,15 @@ DEFAULT_DASHBOARD_PATH = "/lovelace/alerts"
 CONF_CAMERAS = "cameras"
 CONF_CAMERA_NAME = "name"
 CONF_CAMERA_ENTITY = "camera_entity"
-CONF_MOTION_ENTITY = "motion_entity"
+CONF_MOTION_ENTITIES = "motion_entities"
+CONF_MOTION_ENTITY = "motion_entity"  # legacy single-entity key (pre-2.1)
 CONF_SCENE_CONTEXT = "scene_context"
+
+# -- alert target options --------------------------------------------------
+CONF_ALERT_TARGETS = "alert_targets"
+CONF_TARGET_SERVICE = "service"
+CONF_TARGET_MIN_SCORE = "min_score"
+CONF_TARGET_CAMERAS = "cameras"  # camera ids; empty list = all cameras
 
 # -- storage / urls ------------------------------------------------------
 STORAGE_DIR = "ai_camera_centre"  # created under the HA config directory

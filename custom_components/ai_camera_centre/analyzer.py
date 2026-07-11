@@ -27,14 +27,14 @@ from .const import (
     CONF_CAMERA_NAME,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
-    CONF_MIN_NOTIFY_SCORE,
-    CONF_NOTIFY_SERVICES,
     CONF_SCENE_CONTEXT,
     CONF_SNAPSHOT_COUNT,
     CONF_SNAPSHOT_INTERVAL_MS,
+    CONF_TARGET_CAMERAS,
+    CONF_TARGET_MIN_SCORE,
+    CONF_TARGET_SERVICE,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
-    DEFAULT_MIN_NOTIFY_SCORE,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
     DOMAIN,
@@ -133,6 +133,7 @@ class CameraPipeline:
         global_options: dict[str, Any],
         camera_id: str,
         camera_conf: dict[str, Any],
+        targets: list[dict[str, Any]],
     ) -> None:
         self.hass = hass
         self.store = store
@@ -158,14 +159,7 @@ class CameraPipeline:
         self.cooldown = int(
             global_options.get(CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS)
         )
-        self.min_notify_score = int(
-            global_options.get(CONF_MIN_NOTIFY_SCORE, DEFAULT_MIN_NOTIFY_SCORE)
-        )
-        self.notify_services = [
-            s.strip()
-            for s in str(global_options.get(CONF_NOTIFY_SERVICES, "")).split(",")
-            if s.strip()
-        ]
+        self.targets = targets
         self.dashboard_path = global_options.get(
             CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH
         )
@@ -218,8 +212,7 @@ class CameraPipeline:
             }
         )
         async_dispatcher_send(self.hass, SIGNAL_NEW_ALERT, record)
-        if report["score"] >= self.min_notify_score:
-            await self._notify(report, record)
+        await self._notify(report, record)
 
     async def _capture_frames(self) -> list[str]:
         paths: list[str] = []
@@ -270,8 +263,13 @@ class CameraPipeline:
         return _parse_ai_result(result["data"])
 
     async def _notify(self, report: dict[str, Any], record: dict[str, Any]) -> None:
-        for target in self.notify_services:
-            service = target.removeprefix("notify.")
+        for target in self.targets:
+            if report["score"] < int(target.get(CONF_TARGET_MIN_SCORE, 1)):
+                continue
+            cameras = target.get(CONF_TARGET_CAMERAS) or []
+            if cameras and self.camera_id not in cameras:
+                continue
+            service = str(target[CONF_TARGET_SERVICE]).removeprefix("notify.")
             try:
                 await self.hass.services.async_call(
                     "notify",
@@ -287,4 +285,4 @@ class CameraPipeline:
                     blocking=False,
                 )
             except Exception:  # noqa: BLE001 - one bad target must not stop others
-                _LOGGER.exception("%s: notify %s failed", self.camera_id, target)
+                _LOGGER.exception("%s: notify.%s failed", self.camera_id, service)

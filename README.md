@@ -14,16 +14,20 @@ card.
 ## Features
 
 - **Built-in analysis pipeline** — configure cameras entirely in the UI:
-  camera entity, motion sensor, and an optional per-camera scene description
-  that is injected into the AI prompt (e.g. "a gate is visible; subjects
-  behind the gate are likely arriving").
+  camera entity, one or more motion triggers, and an optional per-camera
+  scene description that is injected into the AI prompt (e.g. "a gate is
+  visible; subjects behind the gate are likely arriving").
+- **Alert targets** — add notify services the same way you add cameras.
+  Each target has its own minimum suspicion score and an optional camera
+  filter, so one phone can get every event while another is only woken for
+  high-risk alerts on selected cameras.
 - **AI-powered reports** via Home Assistant's `ai_task` — works with any
   configured AI provider (Google Generative AI, OpenAI, Ollama, ...).
   Each alert includes a short notification line, detailed description,
   direction of travel, activity, carried items, gate state/risk, and a
   1–10 suspicion score.
 - **Mobile notifications** with the alert image and a tap-through to your
-  dashboard; a configurable minimum score filters out benign events.
+  dashboard.
 - **Bundled timeline card** — rolling history grouped by day, camera filter
   chips, score badges, tap to expand the full image and report. Served by
   the integration and auto-registered as a dashboard resource.
@@ -61,17 +65,24 @@ Copy `custom_components/ai_camera_centre/` into your
 ## Setup
 
 1. Settings → Devices & Services → Add Integration → **AI Camera Centre**
-2. Fill in the global settings — most importantly **Notify services**
-   (e.g. `notify.mobile_app_your_phone`; comma-separate several).
-3. Open the integration's **Configure** button → **Add a camera**:
+   and fill in the global settings.
+2. Open the integration's **Configure** button → **Add a camera**:
    - **Camera name** — e.g. "Side Gate"
    - **Camera stream entity** — the `camera.*` entity to snapshot
-   - **Motion sensor** — the `binary_sensor.*` that should trigger analysis
-     (optional; leave blank to trigger only via the `analyze` service)
+   - **Motion triggers** — one or more entities (`binary_sensor`,
+     `input_boolean` or `switch`); any of them turning on starts the
+     analysis (optional; leave blank to trigger only via the `analyze`
+     service)
    - **Scene context** — optional but recommended: describe what the camera
      sees and state explicitly whether a gate is visible
-4. Repeat for each camera. That's it — walk in front of a camera to test, or
-   call the service manually:
+3. Configure → **Add an alert target**:
+   - **Notify service** — pick from the dropdown
+     (e.g. `notify.mobile_app_your_phone`)
+   - **Minimum suspicion score** — 1 sends every alert; 6+ only wakes this
+     target for genuinely suspicious events
+   - **Cameras** — optionally restrict this target to specific cameras
+4. Repeat for each camera and target. That's it — walk in front of a camera
+   to test, or call the service manually:
 
 ```yaml
 action: ai_camera_centre.analyze
@@ -99,7 +110,8 @@ URL `/ai_camera_centre/ai-camera-centre-card.js`, type **JavaScript module**.
 
 ## How the pipeline works
 
-1. Motion sensor turns `on` (per-camera cooldown prevents alert storms)
+1. Any of the camera's motion triggers turns `on` (per-camera cooldown
+   prevents alert storms)
 2. A burst of snapshots is captured from the camera stream (count and
    interval configurable; default 5 shots, 500 ms apart)
 3. The frames go to `ai_task.generate_data` with a structured prompt plus
@@ -107,8 +119,8 @@ URL `/ai_camera_centre/ai-camera-centre-card.js`, type **JavaScript module**.
    moved, in which direction, and how suspicious it looks (1–10)
 4. "No obvious motion" results are dropped; real alerts are archived
    (image + full report) and shown on the card
-5. If the score meets your notification threshold, every configured notify
-   service gets the summary, the image, and a tap-through to your dashboard
+5. Every alert target whose minimum score and camera filter match gets the
+   summary, the image, and a tap-through to your dashboard
 
 Storage lives in `<config>/ai_camera_centre/` (JSONL log + images). Data
 from the previous *Alert History* version of this integration is migrated
