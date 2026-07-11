@@ -1,5 +1,10 @@
 """Generate AI Camera Centre brand assets.
 
+Design: a ceiling dome camera on a white tile. The dome's rim carries the
+four Simple Addins brand colours (green / orange / pink / blue) and the
+housing + wordmark use the Simple Addins navy, so the add-in reads as part
+of the same family as simpleaddins.com.
+
 Outputs (relative to the repo root, run from anywhere):
 - brand/ai_camera_centre/ - icon.png 256, icon@2x.png 512, logo.png
   (<=512 wide, 128 high), logo@2x.png (exactly double) - sized to pass
@@ -9,7 +14,7 @@ Outputs (relative to the repo root, run from anywhere):
 
 Requires Pillow and the Segoe UI Bold font (any Windows machine).
 """
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,72 +23,62 @@ ASSETS = os.path.join(ROOT, "assets")
 FONT_PATH = r"C:\Windows\Fonts\segoeuib.ttf"
 
 SS = 4  # supersample factor
-NAVY_TOP = (22, 67, 107)
-NAVY_BOT = (12, 36, 56)
-NAVY_MID = (18, 49, 79)
-WHITE = (255, 255, 255)
-AMBER = (251, 191, 36)
+
+# Simple Addins palette
+NAVY = (29, 46, 110)
+GREEN = (29, 158, 75)
+ORANGE = (247, 168, 35)
+PINK = (236, 94, 150)
+BLUE = (59, 196, 240)
+TILE = (255, 255, 255)
+TILE_BORDER = (226, 232, 240)
+DOME_TINT = (232, 237, 247)
 
 
-def star(draw, cx, cy, R, ir, fill):
-    pts = [
-        (cx, cy - R), (cx + ir, cy - ir), (cx + R, cy), (cx + ir, cy + ir),
-        (cx, cy + R), (cx - ir, cy + ir), (cx - R, cy), (cx - ir, cy - ir),
-    ]
-    draw.polygon(pts, fill=fill)
+def draw_glyph(img, s, ox=0, oy=0):
+    """Dome camera, designed in 512-space, scaled by s, offset ox/oy."""
+    draw = ImageDraw.Draw(img)
 
+    def box(x0, y0, x1, y1):
+        return [ox + x0 * s, oy + y0 * s, ox + x1 * s, oy + y1 * s]
 
-def draw_glyph(draw, s, ox=0, oy=0):
-    """Camera + sparkles, designed in 512-space, scaled by s, offset ox/oy."""
-    def R(x0, y0, x1, y1, r, fill):
-        draw.rounded_rectangle(
-            [ox + x0 * s, oy + y0 * s, ox + x1 * s, oy + y1 * s],
-            radius=r * s, fill=fill)
-
-    def C(cx, cy, r, fill):
-        draw.ellipse(
-            [ox + (cx - r) * s, oy + (cy - r) * s,
-             ox + (cx + r) * s, oy + (cy + r) * s], fill=fill)
-
-    # stand + base
-    R(195, 290, 227, 352, 10, WHITE)
-    R(148, 344, 274, 372, 14, WHITE)
-    # body
-    R(104, 188, 322, 302, 34, WHITE)
+    # dome: solid navy bottom half of a circle centred on the mount line
+    cx, cy, r = 256, 215, 130
+    dome = box(cx - r, cy - r, cx + r, cy + r)
+    draw.pieslice(dome, start=0, end=180, fill=NAVY)
+    # four-colour ribbon across the dome (clipped to the dome shape)
+    ribbon = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    rd = ImageDraw.Draw(ribbon)
+    seg = 2 * r / 4
+    for i, col in enumerate((GREEN, ORANGE, PINK, BLUE)):
+        rd.rectangle(
+            box(cx - r + i * seg, 252, cx - r + (i + 1) * seg, 296), fill=col
+        )
+    dome_mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(dome_mask).pieslice(dome, start=0, end=180, fill=255)
+    img.paste(ribbon, (0, 0), ImageChops.multiply(ribbon.split()[3], dome_mask))
     # lens
-    C(330, 245, 62, WHITE)
-    C(330, 245, 40, NAVY_BOT)
-    C(340, 233, 13, WHITE)
-    # status LED
-    C(142, 216, 11, AMBER)
-    # sparkles
-    star(draw, ox + 398 * s, oy + 118 * s, 52 * s, 15 * s, AMBER)
-    star(draw, ox + 452 * s, oy + 192 * s, 25 * s, 8 * s, AMBER)
+    draw.ellipse(box(cx - 14, 232 - 14, cx + 14, 232 + 14), fill=TILE)
+    # ceiling mount bar
+    draw.rounded_rectangle(box(116, 175, 396, 213), radius=19 * s, fill=NAVY)
 
 
 def _tile(size):
-    grad = Image.new("RGBA", (size, size))
-    gd = ImageDraw.Draw(grad)
-    for y in range(size):
-        t = y / size
-        col = tuple(
-            int(NAVY_TOP[i] + (NAVY_BOT[i] - NAVY_TOP[i]) * t) for i in range(3)
-        )
-        gd.line([(0, y), (size, y)], fill=col + (255,))
-    mask = Image.new("L", (size, size), 0)
-    md = ImageDraw.Draw(mask)
-    md.rounded_rectangle(
-        [0, 0, size - 1, size - 1], radius=int(size * 100 / 512), fill=255
+    tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tile)
+    radius = int(size * 100 / 512)
+    td.rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=TILE)
+    td.rounded_rectangle(
+        [0, 0, size - 1, size - 1], radius=radius,
+        outline=TILE_BORDER, width=max(1, int(size * 6 / 512)),
     )
-    return grad, mask
+    return tile
 
 
 def make_icon():
     size = 512 * SS
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    grad, mask = _tile(size)
-    img.paste(grad, (0, 0), mask)
-    draw_glyph(ImageDraw.Draw(img), SS)
+    img = _tile(size)
+    draw_glyph(img, SS)
     img.resize((512, 512), Image.LANCZOS).save(os.path.join(OUT, "icon@2x.png"))
     img.resize((256, 256), Image.LANCZOS).save(os.path.join(OUT, "icon.png"))
 
@@ -104,13 +99,12 @@ def make_logo(height, tile_px, font_px, out_main, out_2x=None, max_w=None):
         font = ImageFont.truetype(FONT_PATH, font.size - SS)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    grad, mask = _tile(tile)
     ty0 = (H - tile) // 2
-    img.paste(grad, (0, ty0), mask)
-    draw_glyph(d, tile / 512, ox=0, oy=ty0)
+    img.paste(_tile(tile), (0, ty0))
+    draw_glyph(img, tile / 512, ox=0, oy=ty0)
     d.text(
         (tile + gap, (H - th) // 2 - bbox[1]),
-        text, font=font, fill=NAVY_MID + (255,),
+        text, font=font, fill=NAVY + (255,),
     )
     w1, h1 = W // SS, H // SS
     if out_2x:
