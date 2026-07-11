@@ -1,0 +1,66 @@
+log_alert:
+  name: Log alert
+  description: >-
+    Archive an alert image and append the AI report to the alert history.
+    Optionally returns the archived image URL for use in notifications.
+  fields:
+    camera_id:
+      name: Camera ID
+      description: Short slug identifying the camera (lowercase, underscores)
+      required: true
+      example: side_gate
+      selector:
+        text: null
+    camera_label:
+      name: Camera label
+      description: Friendly name shown in the history card
+      example: Side Gate
+      selector:
+        text: null
+    image_path:
+      name: Image path
+      description: Full path to the snapshot to archive
+      required: true
+      example: /config/www/snapshots/side_gate_3.jpg
+      selector:
+        text: null
+    score:
+      name: Suspicion score
+      description: 1 (benign) to 10 (highly suspicious)
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 10
+    short:
+      name: Short summary
+      selector:
+        text: null
+    detail:
+      name: Detailed report
+      selector:
+        text:
+          multiline: true
+    direction:
+      name: Direction
+      example: towards house
+      selector:
+        text: null
+    carrying:
+      name: Carrying
+      selector:
+        text: null
+    activity:
+      name: Activity
+      selector:
+        text: null
+    gate_state:
+      name: Gate state
+      description: open / closed / unknown, or n/a for cameras without a gate
+      selector:
+        text: null
+    gate_risk:
+      name: Gate risk
+      description: Risk assessment sentence, or n/a
+      selector:
+        text: null

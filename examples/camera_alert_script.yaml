@@ -1,0 +1,179 @@
+# Example: shared multi-camera script using alert_history.log_alert
+#
+# Call from per-camera automations, e.g.:
+#
+#   - action: script.camera_snapshot_ai_alert
+#     data:
+#       camera_id: side_gate
+#       camera_entity: camera.side_gate_snapshots_clear
+#       camera_label: Side Gate
+#       dashboard_path: /lovelace/alerts
+#       scene_context: >-
+#         The camera faces the gate and the front of the house. A gate IS
+#         visible in this scene. The gate is a relative checkpoint for risk.
+#         Subjects in front of the gate are likely leaving. Subjects behind
+#         the gate are likely arriving.
+#
+#   - action: script.camera_snapshot_ai_alert
+#     data:
+#       camera_id: back_garden
+#       camera_entity: camera.back_garden_snapshots_clear
+#       camera_label: Back Garden
+#       dashboard_path: /lovelace/alerts
+#       scene_context: >-
+#         The camera overlooks the enclosed back garden of the house. There
+#         is NO gate in this scene — set gate_state and gate_risk to "n/a".
+
+alias: Camera - Snapshot, AI & Alert
+description: >-
+  Shared multi-camera motion analysis. Takes 5 snapshots, runs AI review,
+  logs the alert to Alert History, and notifies.
+fields:
+  camera_id:
+    name: Camera ID
+    description: Short id used in file paths, lowercase, no spaces
+    required: true
+    example: side_gate
+    selector:
+      text: null
+  camera_entity:
+    name: Camera entity
+    required: true
+    example: camera.side_gate_snapshots_clear
+    selector:
+      entity:
+        domain: camera
+  camera_label:
+    name: Camera label
+    required: true
+    example: Side Gate
+    selector:
+      text: null
+  scene_context:
+    name: Scene context
+    description: >-
+      Camera-specific scene description injected into the AI prompt. State
+      explicitly whether a gate is visible.
+    required: true
+    selector:
+      text:
+        multiline: true
+  dashboard_path:
+    name: Dashboard path
+    description: Where the notification opens when tapped
+    default: /lovelace/alerts
+    selector:
+      text: null
+sequence:
+  - repeat:
+      count: 5
+      sequence:
+        - action: camera.snapshot
+          data:
+            filename: /config/www/snapshots/{{ camera_id }}_{{ repeat.index }}.jpg
+          target:
+            entity_id: "{{ camera_entity }}"
+        - if:
+            - condition: template
+              value_template: "{{ repeat.index < 5 }}"
+          then:
+            - delay:
+                milliseconds: 500
+  - action: ai_task.generate_data
+    response_variable: ai_result
+    data:
+      task_name: "{{ camera_label }} analysis"
+      instructions: >-
+        Motion has been detected by a camera at a residential property. You
+        are being shown 5 images taken half a second apart, in chronological
+        order. Compare the images and describe what caused the motion.
+
+        SCENE CONTEXT: {{ scene_context }}
+
+        Determine direction of travel using ONLY the apparent size change of
+        the subject across the 5 frames: Subject appears LARGER in later
+        frames = moving TOWARD the camera = "towards house" (approaching).
+        Subject appears SMALLER in later frames = moving AWAY FROM the camera
+        = "away from house" (leaving). Cannot determine = "unknown".
+
+        Analyse the images and respond ONLY with a valid JSON object with
+        these fields: "short": A single sentence of maximum 80 characters for
+        a phone notification banner. If suspicious_index is 6 or above, start
+        with "⚠️ ALERT: ". "detail": A 2-3 sentence description including
+        appearance, direction of movement, what they are carrying or doing,
+        and any notable behaviour. "direction": One of "towards house", "away
+        from house", "stationary", or "unknown". "carrying": Brief
+        description of anything being carried or held, or "nothing visible".
+        "activity": Brief description of what the subject appears to be
+        doing, e.g. "walking towards the house", "standing at the gate",
+        "running", "loitering". "gate_state": One of "open", "closed", or
+        "unknown". If the scene context states there is no gate, use "n/a".
+        "gate_risk": A brief sentence assessing whether the gate state
+        combined with the detected motion poses a risk, e.g. an open gate
+        with an animal nearby, or a closed gate being approached by a person.
+        If the scene context states there is no gate, use "n/a".
+        "suspicious_index": A number from 1 to 10. 1 = completely benign
+        (e.g. a cat walking past). 10 = highly suspicious (e.g. a person in
+        dark clothing with tools approaching the house at night). Consider
+        direction, activity, what is being carried, time of day, and gate
+        state when scoring. If you see no obvious cause of motion, respond
+        with: {"short": "No obvious motion detected", "detail": "No obvious
+        motion detected", "direction": "unknown", "carrying": "unknown",
+        "activity": "unknown", "gate_state": "<open or closed if a gate is
+        visible, otherwise n/a>", "gate_risk": "<assess the gate risk if a
+        gate is visible, otherwise n/a>", "suspicious_index": 1}. Only use
+        "gate_state": "unknown" if the scene has a gate but it is not visible
+        in the images. Do not include any text outside the JSON object.
+      attachments:
+        - media_content_id: media-source://media_source/snapshots/{{ camera_id }}_1.jpg
+          media_content_type: image/jpeg
+        - media_content_id: media-source://media_source/snapshots/{{ camera_id }}_2.jpg
+          media_content_type: image/jpeg
+        - media_content_id: media-source://media_source/snapshots/{{ camera_id }}_3.jpg
+          media_content_type: image/jpeg
+        - media_content_id: media-source://media_source/snapshots/{{ camera_id }}_4.jpg
+          media_content_type: image/jpeg
+        - media_content_id: media-source://media_source/snapshots/{{ camera_id }}_5.jpg
+          media_content_type: image/jpeg
+  - variables:
+      ai_json: >-
+        {{ ai_result.data | regex_replace('```json|```', '') | trim | from_json
+        }}
+      ai_short: "{{ ai_json.short }}"
+      ai_detail: "{{ ai_json.detail }}"
+      ai_direction: "{{ ai_json.direction }}"
+      ai_carrying: "{{ ai_json.carrying }}"
+      ai_activity: "{{ ai_json.activity }}"
+      ai_gate_state: "{{ ai_json.gate_state }}"
+      ai_gate_risk: "{{ ai_json.gate_risk }}"
+      ai_suspicious: "{{ ai_json.suspicious_index }}"
+  - if:
+      - condition: template
+        value_template: |
+          {{ 'No obvious motion detected' in ai_short }}
+    then:
+      - stop: No significant motion
+    else:
+      - action: alert_history.log_alert
+        response_variable: logged
+        data:
+          camera_id: "{{ camera_id }}"
+          camera_label: "{{ camera_label }}"
+          image_path: /config/www/snapshots/{{ camera_id }}_3.jpg
+          score: "{{ ai_suspicious | int }}"
+          short: "{{ ai_short }}"
+          detail: "{{ ai_detail }}"
+          direction: "{{ ai_direction }}"
+          carrying: "{{ ai_carrying }}"
+          activity: "{{ ai_activity }}"
+          gate_state: "{{ ai_gate_state }}"
+          gate_risk: "{{ ai_gate_risk }}"
+      - action: notify.mobile_app_ben_s_note15_pro
+        data:
+          message: "{{ ai_short }}"
+          title: "{{ camera_label }} Motion [{{ ai_suspicious }}/10]"
+          data:
+            image: "{{ logged.image_url }}"
+            clickAction: "{{ dashboard_path }}"
+mode: parallel
+max: 4

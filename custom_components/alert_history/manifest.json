@@ -1,0 +1,15 @@
+{
+  "domain": "alert_history",
+  "name": "Alert History",
+  "codeowners": ["@bendraper"],
+  "config_flow": true,
+  "dependencies": ["http", "websocket_api"],
+  "after_dependencies": ["lovelace"],
+  "documentation": "https://github.com/bendraper/alert-history",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/bendraper/alert-history/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "1.0.0"
+}
