@@ -167,17 +167,6 @@ central [home-assistant/brands](https://github.com/home-assistant/brands)
 repository, not from this repo; see
 [docs/BRANDING.md](docs/BRANDING.md) for the one-time submission.
 
-## Upgrading from Alert History (v1.x)
-
-The integration was renamed (`alert_history` → `ai_camera_centre`) in v2.0:
-
-1. Remove the old *Alert History* integration entry and the
-   `custom_components/alert_history/` folder
-2. Install AI Camera Centre and add the integration
-3. Stored alerts/images are migrated automatically; dashboards using
-   `custom:alert-history-card` keep working (the old card name is aliased),
-   but new dashboards should use `custom:ai-camera-centre-card`
-
 ## Releasing (maintainers)
 
 1. Bump `version` in `custom_components/ai_camera_centre/manifest.json` and
@@ -187,3 +176,7 @@ The integration was renamed (`alert_history` → `ai_camera_centre`) in v2.0:
 
 Brand assets (integration icon/logo) are documented in
 [docs/BRANDING.md](docs/BRANDING.md).
+
+## Roadmap
+
+Planned features not yet built are tracked in [TODO.md](TODO.md).
