@@ -22,7 +22,8 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # Brand images ship inside the integration (HA 2026.3 brands
-          # proxy), not the central home-assistant/brands repo, so skip
-          # that check.
-          ignore: brands
+          # brands: images ship inside the integration (HA 2026.3 brands
+          # proxy), not the central home-assistant/brands repo.
+          # description/topics: set on the GitHub repo (Settings / About),
+          # not in code — drop these two ignores once they're added.
+          ignore: brands description topics
