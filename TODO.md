@@ -49,6 +49,13 @@
 
 ## Backlog — further ideas (unscoped)
 
+- **Auto-inherit camera area** — when a camera device is created, look up
+  the source camera entity's area (entity registry → its device/area) and
+  set the AI Camera Centre device to the same area, so it doesn't need
+  manual placement. Users can still override. Registry lookup at setup in
+  `__init__.async_setup_entry` (or via `DeviceInfo`); make it best-effort
+  (skip if the source entity has no area). Cameras are already assignable to
+  areas manually today (they're devices) — this is just convenience.
 - **Live card updates** — push new alerts to the Lovelace card over a
   websocket subscription instead of the current 5-minute poll, so an alert
   appears on the dashboard the moment it's logged.
