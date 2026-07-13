@@ -35,6 +35,7 @@ from .const import (
     CONF_LOG_WINDOW_END,
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
+    CONF_REPEAT_CONTEXT_MINUTES,
     CONF_SCENE_CONTEXT,
     CONF_SNAPSHOT_COUNT,
     CONF_SNAPSHOT_INTERVAL_MS,
@@ -42,10 +43,13 @@ from .const import (
     CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_SERVICE,
+    CONF_VISITOR_DESCRIPTION,
+    CONF_VISITOR_NAME,
     DEFAULT_ALARMO_TRIGGER_SCORE,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
     DEFAULT_MIN_LOG_SCORE,
+    DEFAULT_REPEAT_CONTEXT_MINUTES,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
     ACTION_SOUND_ALARM,
@@ -104,8 +108,9 @@ Respond ONLY with a valid JSON object with these fields: "short" (string, max
 from house", "stationary", "unknown"), "carrying" (string), "activity"
 (string), "gate_state" (one of "open", "closed", "unknown", "n/a" — use "n/a"
 when the scene has no gate and "unknown" only when a gate exists but is not
-visible), "gate_risk" (string, or "n/a"), "suspicious_index" (integer 1-10).
-Do not include any text outside the JSON object."""
+visible), "gate_risk" (string, or "n/a"), "suspicious_index" (integer 1-10),
+"known_person" (name of a listed known person the subject matches, or
+"none"). Do not include any text outside the JSON object."""
 
 # Schema passed to ai_task.generate_data's `structure` parameter so the
 # provider returns validated fields directly (no prompt-and-parse).
@@ -165,6 +170,13 @@ ALERT_STRUCTURE = {
         "description": "Suspicion score, 1 (benign) to 10 (highly suspicious).",
         "selector": {"number": {"min": 1, "max": 10}},
     },
+    "known_person": {
+        "description": (
+            "Name of the known person the subject clearly matches (from the "
+            "KNOWN PEOPLE list, if provided), otherwise 'none'."
+        ),
+        "selector": {"text": {}},
+    },
 }
 
 
@@ -194,6 +206,7 @@ def _parse_ai_result(raw: Any) -> dict[str, Any]:
         "activity": str(raw.get("activity", "unknown")),
         "gate_state": str(raw.get("gate_state", "n/a")),
         "gate_risk": str(raw.get("gate_risk", "n/a")),
+        "known_person": str(raw.get("known_person", "none") or "none"),
     }
 
 
@@ -208,6 +221,7 @@ class CameraPipeline:
         camera_id: str,
         camera_conf: dict[str, Any],
         targets: list[dict[str, Any]],
+        known_visitors: list[dict[str, Any]] | None = None,
     ) -> None:
         self.hass = hass
         self.store = store
@@ -252,6 +266,13 @@ class CameraPipeline:
         )
         self.log_window_start = global_options.get(CONF_LOG_WINDOW_START)
         self.log_window_end = global_options.get(CONF_LOG_WINDOW_END)
+        # context injected into the prompt
+        self.known_visitors = known_visitors or []
+        self.repeat_context_minutes = int(
+            global_options.get(
+                CONF_REPEAT_CONTEXT_MINUTES, DEFAULT_REPEAT_CONTEXT_MINUTES
+            )
+        )
         # runtime state (survives pipeline rebuilds via the switch entity)
         self.paused = False
         # set False after the first structured-output failure so we don't
@@ -366,6 +387,59 @@ class CameraPipeline:
         # window wraps past midnight (e.g. 22:00 -> 06:00)
         return now_t >= start or now_t < end
 
+    # -- prompt context (known people + recent activity) -----------------
+
+    def _context_sections(self) -> str:
+        parts = [s for s in (self._known_people_section(), self._recent_activity()) if s]
+        return ("\n\n" + "\n\n".join(parts)) if parts else ""
+
+    def _known_people_section(self) -> str:
+        people = [
+            f"- {v[CONF_VISITOR_NAME]}: {v[CONF_VISITOR_DESCRIPTION]}"
+            for v in self.known_visitors
+            if v.get(CONF_VISITOR_NAME) and v.get(CONF_VISITOR_DESCRIPTION)
+        ]
+        if not people:
+            return ""
+        return (
+            "KNOWN PEOPLE (household members and regulars — NOT suspicious):\n"
+            + "\n".join(people)
+            + "\nIf the subject clearly matches one of these people, set "
+            '"known_person" to their name and score low (1-2). If the subject '
+            'does not clearly match anyone here, set "known_person" to "none" '
+            "and score normally."
+        )
+
+    def _recent_activity(self) -> str:
+        if self.repeat_context_minutes <= 0:
+            return ""
+        cutoff = time.time() - self.repeat_context_minutes * 60
+        recent = [
+            r
+            for r in self.store.camera_alerts(self.camera_id)
+            if float(r.get("ts", 0)) >= cutoff
+        ]
+        if not recent:
+            return ""
+        now = time.time()
+        lines = []
+        for r in recent[:5]:
+            mins = max(0, int((now - float(r.get("ts", now))) / 60))
+            who = r.get("known_person") or "none"
+            tag = f" [{who}]" if who != "none" else ""
+            lines.append(
+                f"- {mins} min ago (score {r.get('score')}){tag}: "
+                f"{r.get('short', '')}"
+            )
+        return (
+            f"RECENT ACTIVITY AT THIS CAMERA (last {self.repeat_context_minutes} "
+            "min, newest first):\n"
+            + "\n".join(lines)
+            + "\nIf this looks like the same subject as a recent entry, still "
+            "present or returning, say so in the detail and consider a higher "
+            "score for loitering or repeated approaches."
+        )
+
     # -- presence / alarm state ------------------------------------------
 
     def _anyone_home(self) -> bool:
@@ -438,10 +512,13 @@ class CameraPipeline:
             f"{self.snapshot_interval:g} second"
             f"{'s' if self.snapshot_interval != 1 else ''}"
         )
-        instructions = ANALYSIS_INSTRUCTIONS.format(
-            count=len(paths),
-            interval=interval,
-            scene_context=self.scene_context,
+        instructions = (
+            ANALYSIS_INSTRUCTIONS.format(
+                count=len(paths),
+                interval=interval,
+                scene_context=self.scene_context,
+            )
+            + self._context_sections()
         )
         base: dict[str, Any] = {
             "task_name": f"{self.label} analysis",

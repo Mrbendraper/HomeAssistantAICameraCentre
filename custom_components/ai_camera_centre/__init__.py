@@ -56,6 +56,7 @@ from .const import (
     SNAPSHOTS_URL,
     STORAGE_DIR,
     SUBENTRY_CAMERA,
+    SUBENTRY_KNOWN_VISITOR,
     SUBENTRY_TARGET,
     VERSION,
 )
@@ -87,6 +88,7 @@ LOG_ALERT_SCHEMA = vol.Schema(
         vol.Optional("activity", default="unknown"): cv.string,
         vol.Optional("gate_state", default="n/a"): cv.string,
         vol.Optional("gate_risk", default="n/a"): cv.string,
+        vol.Optional("known_person", default="none"): cv.string,
     }
 )
 
@@ -178,6 +180,7 @@ class AlertStore:
             "activity": data["activity"],
             "gate_state": data["gate_state"],
             "gate_risk": data["gate_risk"],
+            "known_person": data.get("known_person", "none"),
             "image": f"{IMAGES_URL}/{camera_id}/{fname}",
         }
         async with self._lock:
@@ -305,6 +308,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for sub in entry.subentries.values()
         if sub.subentry_type == SUBENTRY_TARGET
     ]
+    known_visitors = [
+        dict(sub.data)
+        for sub in entry.subentries.values()
+        if sub.subentry_type == SUBENTRY_KNOWN_VISITOR
+    ]
 
     pipelines: dict[str, CameraPipeline] = {}
     for sub in entry.subentries.values():
@@ -313,7 +321,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         camera_conf = dict(sub.data)
         camera_id = camera_conf.get(CONF_CAMERA_ID) or sub.subentry_id
         pipeline = CameraPipeline(
-            hass, store, dict(entry.options), camera_id, camera_conf, targets
+            hass,
+            store,
+            dict(entry.options),
+            camera_id,
+            camera_conf,
+            targets,
+            known_visitors,
         )
         pipelines[camera_id] = pipeline
         motion_entities = camera_conf.get(CONF_MOTION_ENTITIES) or []

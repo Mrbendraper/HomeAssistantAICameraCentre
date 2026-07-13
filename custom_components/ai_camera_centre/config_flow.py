@@ -50,6 +50,7 @@ from .const import (
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
     CONF_MOTION_ENTITIES,
+    CONF_REPEAT_CONTEXT_MINUTES,
     CONF_RETENTION_DAYS,
     CONF_SCENE_CONTEXT,
     CONF_SNAPSHOT_COUNT,
@@ -59,10 +60,13 @@ from .const import (
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_NAME,
     CONF_TARGET_SERVICE,
+    CONF_VISITOR_DESCRIPTION,
+    CONF_VISITOR_NAME,
     DEFAULT_ALARMO_TRIGGER_SCORE,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
     DEFAULT_MIN_LOG_SCORE,
+    DEFAULT_REPEAT_CONTEXT_MINUTES,
     DEFAULT_RETENTION_DAYS,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
@@ -73,6 +77,7 @@ from .const import (
     NOTIFY_AWAY,
     NOTIFY_AWAY_OR_ARMED,
     SUBENTRY_CAMERA,
+    SUBENTRY_KNOWN_VISITOR,
     SUBENTRY_TARGET,
 )
 
@@ -85,6 +90,7 @@ INT_SETTINGS = (
     CONF_COOLDOWN_SECONDS,
     CONF_ALARMO_TRIGGER_SCORE,
     CONF_MIN_LOG_SCORE,
+    CONF_REPEAT_CONTEXT_MINUTES,
 )
 
 # Optional settings that must be cleared when the user empties them.
@@ -157,6 +163,14 @@ def _settings_schema(options: dict[str, Any]) -> vol.Schema:
                 default=_get(CONF_MIN_LOG_SCORE, DEFAULT_MIN_LOG_SCORE),
             ): NumberSelector(
                 NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+            ),
+            vol.Required(
+                CONF_REPEAT_CONTEXT_MINUTES,
+                default=_get(
+                    CONF_REPEAT_CONTEXT_MINUTES, DEFAULT_REPEAT_CONTEXT_MINUTES
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(min=0, max=120, mode=NumberSelectorMode.BOX)
             ),
             vol.Optional(
                 CONF_LOG_WINDOW_START,
@@ -321,6 +335,32 @@ def _clean_target(user_input: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _visitor_schema(visitor: dict[str, Any] | None = None) -> vol.Schema:
+    """Add/edit known-visitor form, prefilled when editing."""
+    visitor = visitor or {}
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_VISITOR_NAME,
+                default=visitor.get(CONF_VISITOR_NAME, ""),
+            ): TextSelector(),
+            vol.Required(
+                CONF_VISITOR_DESCRIPTION,
+                description={
+                    "suggested_value": visitor.get(CONF_VISITOR_DESCRIPTION, "")
+                },
+            ): TextSelector(TextSelectorConfig(multiline=True)),
+        }
+    )
+
+
+def _clean_visitor(user_input: dict[str, Any]) -> dict[str, Any]:
+    return {
+        CONF_VISITOR_NAME: user_input[CONF_VISITOR_NAME].strip(),
+        CONF_VISITOR_DESCRIPTION: user_input[CONF_VISITOR_DESCRIPTION].strip(),
+    }
+
+
 # -- flows ---------------------------------------------------------------
 
 
@@ -357,6 +397,7 @@ class AICameraCentreConfigFlow(ConfigFlow, domain=DOMAIN):
         return {
             SUBENTRY_CAMERA: CameraSubentryFlow,
             SUBENTRY_TARGET: AlertTargetSubentryFlow,
+            SUBENTRY_KNOWN_VISITOR: KnownVisitorSubentryFlow,
         }
 
 
@@ -473,4 +514,41 @@ class AlertTargetSubentryFlow(ConfigSubentryFlow):
             data_schema=_target_schema(
                 self.hass, self._cameras(), dict(subentry.data)
             ),
+        )
+
+
+class KnownVisitorSubentryFlow(ConfigSubentryFlow):
+    """Add or edit a known visitor (household member / regular)."""
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            visitor = _clean_visitor(user_input)
+            if not visitor[CONF_VISITOR_NAME]:
+                errors[CONF_VISITOR_NAME] = "invalid_name"
+            else:
+                return self.async_create_entry(
+                    title=visitor[CONF_VISITOR_NAME], data=visitor
+                )
+        return self.async_show_form(
+            step_id="user", data_schema=_visitor_schema(), errors=errors
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        subentry = self._get_reconfigure_subentry()
+        if user_input is not None:
+            visitor = _clean_visitor(user_input)
+            return self.async_update_and_abort(
+                self._get_entry(),
+                subentry,
+                title=visitor[CONF_VISITOR_NAME],
+                data=visitor,
+            )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_visitor_schema(dict(subentry.data)),
         )

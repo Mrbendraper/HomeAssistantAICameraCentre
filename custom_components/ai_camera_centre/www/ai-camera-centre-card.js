@@ -305,6 +305,7 @@ class AICameraCentreCard extends HTMLElement {
       </div>`;
     if (this._expanded === id) {
       const hasGate = a.gate_state && a.gate_state !== "n/a";
+      const known = a.known_person && a.known_person !== "none" ? a.known_person : null;
       html += `
       <div class="detail-panel">
         <img class="detail-img" src="${this._esc(a.image)}"
@@ -312,6 +313,8 @@ class AICameraCentreCard extends HTMLElement {
              onerror="this.style.display='none'">
         <div class="detail-text">${this._esc(a.detail)}</div>
         <div class="grid">
+          ${known ? `<div class="cardlet"><div class="cardlet-label">Recognised</div>
+            <div class="cardlet-value">&#128100; ${this._esc(known)}</div></div>` : ""}
           <div class="cardlet"><div class="cardlet-label">Direction</div>
             <div class="cardlet-value">${this._esc(a.direction || "unknown")}</div></div>
           <div class="cardlet"><div class="cardlet-label">Activity</div>

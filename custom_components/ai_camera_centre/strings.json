@@ -13,6 +13,7 @@
           "ai_task_entity": "AI Task entity (blank = Home Assistant's default)",
           "alarm_panel_entity": "Alarm panel (optional — enables the 'armed' notify conditions and Alarmo triggering)",
           "min_log_score": "Minimum score to log an alert (1 = log every real alert)",
+          "repeat_context_minutes": "Recent-activity context window in minutes (0 = off) — lets the AI spot the same person returning or loitering",
           "log_window_start": "Only log alerts after this time (optional)",
           "log_window_end": "Only log alerts before this time (optional)",
           "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
@@ -38,6 +39,7 @@
           "ai_task_entity": "AI Task entity (blank = Home Assistant's default)",
           "alarm_panel_entity": "Alarm panel (optional — enables the 'armed' notify conditions and Alarmo triggering)",
           "min_log_score": "Minimum score to log an alert (1 = log every real alert)",
+          "repeat_context_minutes": "Recent-activity context window in minutes (0 = off) — lets the AI spot the same person returning or loitering",
           "log_window_start": "Only log alerts after this time (optional)",
           "log_window_end": "Only log alerts before this time (optional)",
           "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
@@ -112,6 +114,34 @@
       },
       "error": {
         "invalid_service": "Please select or enter a notify service."
+      }
+    },
+    "known_visitor": {
+      "initiate_flow": {
+        "user": "Add known visitor",
+        "reconfigure": "Edit known visitor"
+      },
+      "entry_type": "Known visitor",
+      "step": {
+        "user": {
+          "title": "Add known visitor",
+          "description": "Describe a household member or regular so the AI can recognise them and treat them as low-risk. The description is added to every camera's prompt — include distinguishing features (build, typical clothing, whether they use a wheelchair, a pet, etc.).",
+          "data": {
+            "name": "Name (e.g. Ben, the postman)",
+            "description": "Description for the AI"
+          }
+        },
+        "reconfigure": {
+          "title": "Edit known visitor",
+          "description": "The description is added to every camera's prompt — include distinguishing features (build, typical clothing, a pet, etc.).",
+          "data": {
+            "name": "Name (e.g. Ben, the postman)",
+            "description": "Description for the AI"
+          }
+        }
+      },
+      "error": {
+        "invalid_name": "Please enter a name."
       }
     }
   }

@@ -1,11 +1,12 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 # subentry types
 SUBENTRY_CAMERA = "camera"
 SUBENTRY_TARGET = "alert_target"
+SUBENTRY_KNOWN_VISITOR = "known_visitor"
 
 # how recent an alert must be for the per-camera binary sensor to read "on"
 RECENT_ALERT_MINUTES = 5
@@ -25,12 +26,15 @@ CONF_ALARMO_TRIGGER_SCORE = "alarmo_trigger_score"
 CONF_MIN_LOG_SCORE = "min_log_score"
 CONF_LOG_WINDOW_START = "log_window_start"
 CONF_LOG_WINDOW_END = "log_window_end"
+# repeat-visitor context
+CONF_REPEAT_CONTEXT_MINUTES = "repeat_context_minutes"
 
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_SNAPSHOT_COUNT = 5
 DEFAULT_SNAPSHOT_INTERVAL_MS = 500
 DEFAULT_COOLDOWN_SECONDS = 30
 DEFAULT_DASHBOARD_PATH = "/lovelace/alerts"
+DEFAULT_REPEAT_CONTEXT_MINUTES = 15  # 0 = disabled
 DEFAULT_ALARMO_TRIGGER_SCORE = 9
 DEFAULT_MIN_LOG_SCORE = 1
 
@@ -64,6 +68,10 @@ CONF_CAMERA_NAME = "name"
 CONF_CAMERA_ENTITY = "camera_entity"
 CONF_MOTION_ENTITIES = "motion_entities"
 CONF_SCENE_CONTEXT = "scene_context"
+
+# -- known visitor subentry data -----------------------------------------
+CONF_VISITOR_NAME = "name"
+CONF_VISITOR_DESCRIPTION = "description"
 
 # -- alert target subentry data ------------------------------------------
 CONF_TARGET_NAME = "name"  # optional friendly name; derived if blank

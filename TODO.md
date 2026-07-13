@@ -75,21 +75,21 @@ _Done since 2.3.1 (unreleased, next tag):_
 - **Card lightbox** ✅ (v2.4.0) — tapping the expanded alert image opens a
   full-screen overlay (click / × to close). Frontend only.
 
+- **Repeat-visitor context** ✅ (v2.5.0) — `repeat_context_minutes` setting;
+  the camera's alerts within the window are summarised into the prompt
+  (`_recent_activity`) so the AI can flag the same subject returning /
+  loitering and raise the score.
+- **Known visitors** ✅ (v2.5.0) — new `known_visitor` subentry type
+  (name + description); descriptions injected into every camera's prompt
+  (`_known_people_section`); a `known_person` field added to the AI output
+  structure, the alert record, the event and the card, so recognised
+  household members score low and are labelled.
+
 _Still open:_
 
 - **Live card updates** — push new alerts to the Lovelace card over a
   websocket subscription instead of the current 5-minute poll, so an alert
   appears on the dashboard the moment it's logged.
-- **HA event on every alert** — fire `ai_camera_centre_alert` on the event
-  bus with the full report, so users can build their own automations
-  without touching our services.
-- **Structured AI output** — use `ai_task.generate_data`'s `structure`
-  parameter (schema-enforced fields) instead of prompt-and-parse JSON;
-  falls back to text parsing for providers that don't support it.
-- **Repeat-visitor context** — include the previous alert's report (if
-  recent) in the prompt so the AI can say "same person as 3 minutes ago,
-  still loitering" and score escalating behaviour higher; optionally
-  suppress duplicate notifications for the same ongoing event.
 - **Video clips** — record a short clip (`camera.record`) alongside the
   snapshot burst and attach it to the notification / detail view.
 - **Notification polish** — Android notification channels by score band

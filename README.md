@@ -38,6 +38,13 @@ card.
   Each alert includes a short notification line, detailed description,
   direction of travel, activity, carried items, gate state/risk, and a
   1–10 suspicion score.
+- **Known visitors** — add household members and regulars (a name and a
+  description) so the AI recognises them and scores them low; the recognised
+  name is recorded on the alert (and, being low-scoring, they won't wake
+  targets whose minimum score is higher).
+- **Repeat-visitor awareness** — a camera's recent alerts are fed back into
+  the prompt so the AI can spot the same person returning or loitering and
+  raise the score accordingly.
 - **Mobile notifications** with the alert image and a tap-through to your
   dashboard. High-scoring alerts (7+) use a separate high-importance
   notification channel so you can let them ring through Do Not Disturb, and
@@ -106,13 +113,20 @@ Copy `custom_components/ai_camera_centre/` into your
    - **When to notify** — always, or only when nobody's home / the alarm is
      armed / either (the armed options need an alarm panel set in Settings)
    - **Cameras** — optionally restrict this target to specific cameras
-4. Optional, in the integration's **Configure** button (global **Settings**):
+4. Optional, on the integration page click **Add known visitor** for each
+   household member or regular — a **name** and a **description** of
+   distinguishing features (build, typical clothing, a pet, a wheelchair,
+   etc.). The description is added to every camera's prompt so the AI can
+   recognise them and score them low.
+5. Optional, in the integration's **Configure** button (global **Settings**):
    - **Alarm panel** — pick your `alarm_control_panel.*` to enable the armed
      notify conditions and Alarmo triggering
    - **Minimum score to log** / **log time window** — keep low-risk or
      daytime noise out of the history
+   - **Recent-activity context window** — minutes of prior alerts fed back
+     to the AI for repeat-visitor/loitering awareness (0 disables it)
    - **Trigger Alarmo** — sound Alarmo on high-risk alerts while armed
-5. Repeat for each camera and target. That's it — walk in front of a camera
+6. Repeat for each camera and target. That's it — walk in front of a camera
    to test, use its *Analyze now* button, or call the service manually:
 
 ```yaml
@@ -167,8 +181,9 @@ action:
 ```
 
 Event data: `camera_id`, `camera_label`, `score` (1–10), `short`, `detail`,
-`direction`, `carrying`, `activity`, `gate_state`, `gate_risk`, `image`
-(URL), and `logged` (whether it was archived to the history).
+`direction`, `carrying`, `activity`, `gate_state`, `gate_risk`,
+`known_person` (recognised household member, or `none`), `image` (URL), and
+`logged` (whether it was archived to the history).
 
 ## How the pipeline works
 
