@@ -48,12 +48,14 @@ from .const import (
     DEFAULT_MIN_LOG_SCORE,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
+    ACTION_SOUND_ALARM,
     DEFAULT_TARGET_CONDITION,
     DOMAIN,
     EVENT_ALERT,
     NOTIFY_ARMED,
     NOTIFY_AWAY,
     NOTIFY_AWAY_OR_ARMED,
+    NOTIFY_HIGH_SCORE,
     SIGNAL_NEW_ALERT,
     SNAPSHOTS_URL,
 )
@@ -512,12 +514,38 @@ class CameraPipeline:
                     {
                         "title": f"{self.label} Motion [{report['score']}/10]",
                         "message": report["short"],
-                        "data": {
-                            "image": image_url,
-                            "clickAction": self.dashboard_path,
-                        },
+                        "data": self._notification_data(report, image_url),
                     },
                     blocking=False,
                 )
             except Exception:  # noqa: BLE001 - one bad target must not stop others
                 _LOGGER.exception("%s: notify.%s failed", self.camera_id, service)
+
+    def _notification_data(
+        self, report: dict[str, Any], image_url: str
+    ) -> dict[str, Any]:
+        """Build the companion-app notification payload.
+
+        High-scoring alerts use a separate high-importance Android channel
+        (so they can be allowed to ring through Do Not Disturb) and the iOS
+        time-sensitive interruption level. A "Sound alarm" action button is
+        added when an alarm panel is configured.
+        """
+        high = report["score"] >= NOTIFY_HIGH_SCORE
+        data: dict[str, Any] = {
+            "image": image_url,
+            "clickAction": self.dashboard_path,
+            # one live notification per camera; a newer alert replaces it
+            "tag": f"{DOMAIN}_{self.camera_id}",
+            "channel": "AI Camera high alerts" if high else "AI Camera alerts",
+            "importance": "high" if high else "default",
+            "priority": "high" if high else "normal",
+            "ttl": 0,
+            # iOS
+            "push": {"interruption-level": "time-sensitive" if high else "active"},
+        }
+        if self.alarm_panel_entity:
+            data["actions"] = [
+                {"action": ACTION_SOUND_ALARM, "title": "Sound alarm"}
+            ]
+        return data

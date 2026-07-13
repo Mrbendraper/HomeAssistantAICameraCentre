@@ -23,13 +23,17 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import (
+    Event,
     HomeAssistant,
     ServiceCall,
     ServiceResponse,
     SupportsResponse,
+    callback,
 )
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -38,7 +42,10 @@ from homeassistant.helpers.event import (
 
 from .analyzer import CameraPipeline
 from .const import (
+    ACTION_SOUND_ALARM,
     CARD_URL,
+    CONF_ALARM_PANEL_ENTITY,
+    CONF_CAMERA_ENTITY,
     CONF_CAMERA_ID,
     CONF_MOTION_ENTITIES,
     CONF_RETENTION_DAYS,
@@ -346,14 +353,72 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DOMAIN, SERVICE_ANALYZE, handle_analyze, schema=ANALYZE_SCHEMA
     )
 
+    async def handle_notification_action(event: Event) -> None:
+        """'Sound alarm' button on a notification -> trigger Alarmo."""
+        if event.data.get("action") != ACTION_SOUND_ALARM:
+            return
+        panel = entry.options.get(CONF_ALARM_PANEL_ENTITY)
+        if not panel:
+            return
+        try:
+            await hass.services.async_call(
+                "alarmo", "trigger", {"entity_id": panel}, blocking=False
+            )
+        except Exception:  # noqa: BLE001 - alarmo missing / API change
+            _LOGGER.exception("Failed to trigger alarm from notification action")
+
+    entry.async_on_unload(
+        hass.bus.async_listen(
+            "mobile_app_notification_action", handle_notification_action
+        )
+    )
+
     entry.async_on_unload(
         async_track_time_interval(hass, store.async_prune, timedelta(hours=6))
     )
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _inherit_camera_areas(hass, entry)
     hass.async_create_task(_async_register_lovelace_resource(hass))
     return True
+
+
+def _source_area_id(
+    ent_reg: er.EntityRegistry, dev_reg: dr.DeviceRegistry, entity_id: str
+) -> str | None:
+    """The area of a camera entity (its own, else its device's)."""
+    source = ent_reg.async_get(entity_id)
+    if source is None:
+        return None
+    if source.area_id:
+        return source.area_id
+    if source.device_id and (device := dev_reg.async_get(source.device_id)):
+        return device.area_id
+    return None
+
+
+@callback
+def _inherit_camera_areas(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Place each camera device in its source camera's area, if unset.
+
+    Runs after the platforms create the devices. Only fills an empty area,
+    so a user's manual placement is never overridden.
+    """
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    for sub in entry.subentries.values():
+        if sub.subentry_type != SUBENTRY_CAMERA:
+            continue
+        camera_id = sub.data.get(CONF_CAMERA_ID)
+        camera_entity = sub.data.get(CONF_CAMERA_ENTITY)
+        if not camera_id or not camera_entity:
+            continue
+        device = dev_reg.async_get_device(identifiers={(DOMAIN, camera_id)})
+        if device is None or device.area_id is not None:
+            continue
+        if area_id := _source_area_id(ent_reg, dev_reg, camera_entity):
+            dev_reg.async_update_device(device.id, area_id=area_id)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

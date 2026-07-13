@@ -1,7 +1,7 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.3.1"
+VERSION = "2.4.0"
 
 # subentry types
 SUBENTRY_CAMERA = "camera"
@@ -33,6 +33,12 @@ DEFAULT_COOLDOWN_SECONDS = 30
 DEFAULT_DASHBOARD_PATH = "/lovelace/alerts"
 DEFAULT_ALARMO_TRIGGER_SCORE = 9
 DEFAULT_MIN_LOG_SCORE = 1
+
+# score at/above which notifications use the high-priority channel
+NOTIFY_HIGH_SCORE = 7
+
+# mobile_app notification action id for the "Sound alarm" button
+ACTION_SOUND_ALARM = "ACC_SOUND_ALARM"
 
 # alarm_control_panel states treated as "armed"
 ARMED_STATES = frozenset(

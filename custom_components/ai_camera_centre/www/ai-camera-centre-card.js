@@ -17,6 +17,7 @@ class AICameraCentreCard extends HTMLElement {
     this._config = { title: "Camera Alerts", days: 7, ...config };
     this._filter = "all";
     this._expanded = null;
+    this._lightbox = null;
     this._alerts = [];
     this._error = null;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
@@ -198,6 +199,22 @@ class AICameraCentreCard extends HTMLElement {
         .detail-panel { padding: 4px 16px 14px; }
         .detail-panel img {
           width: 100%; border-radius: 8px; margin-bottom: 10px; display: block;
+          cursor: zoom-in;
+        }
+        .lightbox {
+          position: fixed; inset: 0; z-index: 9999;
+          background: rgba(0, 0, 0, 0.9);
+          display: flex; align-items: center; justify-content: center;
+          cursor: zoom-out;
+        }
+        .lightbox img {
+          max-width: 96vw; max-height: 92vh; border-radius: 6px;
+          box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+        }
+        .lb-close {
+          position: fixed; top: 12px; right: 16px;
+          background: none; border: none; color: #fff;
+          font-size: 34px; line-height: 1; cursor: pointer; padding: 4px;
         }
         .detail-text {
           font-size: 13px; line-height: 1.6; color: var(--primary-text-color);
@@ -231,6 +248,12 @@ class AICameraCentreCard extends HTMLElement {
         <div class="chips">${chips}</div>
         ${body}
       </ha-card>
+      ${
+        this._lightbox
+          ? `<div class="lightbox"><button class="lb-close" title="Close">&times;</button>
+             <img src="${this._esc(this._lightbox)}"></div>`
+          : ""
+      }
     `;
 
     this.shadowRoot.querySelector(".refresh").addEventListener("click", () => this._load());
@@ -248,6 +271,20 @@ class AICameraCentreCard extends HTMLElement {
         this._render();
       })
     );
+    this.shadowRoot.querySelectorAll(".detail-img").forEach((el) =>
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this._lightbox = el.dataset.full;
+        this._render();
+      })
+    );
+    const lb = this.shadowRoot.querySelector(".lightbox");
+    if (lb) {
+      lb.addEventListener("click", () => {
+        this._lightbox = null;
+        this._render();
+      });
+    }
   }
 
   _row(a) {
@@ -270,7 +307,9 @@ class AICameraCentreCard extends HTMLElement {
       const hasGate = a.gate_state && a.gate_state !== "n/a";
       html += `
       <div class="detail-panel">
-        <img src="${this._esc(a.image)}" onerror="this.style.display='none'">
+        <img class="detail-img" src="${this._esc(a.image)}"
+             data-full="${this._esc(a.image)}"
+             onerror="this.style.display='none'">
         <div class="detail-text">${this._esc(a.detail)}</div>
         <div class="grid">
           <div class="cardlet"><div class="cardlet-label">Direction</div>

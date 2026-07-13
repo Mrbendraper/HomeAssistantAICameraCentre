@@ -39,7 +39,12 @@ card.
   direction of travel, activity, carried items, gate state/risk, and a
   1–10 suspicion score.
 - **Mobile notifications** with the alert image and a tap-through to your
-  dashboard.
+  dashboard. High-scoring alerts (7+) use a separate high-importance
+  notification channel so you can let them ring through Do Not Disturb, and
+  get the iOS time-sensitive level; when an alarm panel is configured the
+  notification carries a **Sound alarm** action button that trips Alarmo.
+- **Per-camera devices** placed automatically in the same **area** as your
+  source camera entity (you can move them afterwards).
 - **Bundled timeline card** — rolling history grouped by day, camera filter
   chips, score badges, tap to expand the full image and report. Served by
   the integration and auto-registered as a dashboard resource.
@@ -123,6 +128,9 @@ type: custom:ai-camera-centre-card
 title: Camera Alerts
 days: 7
 ```
+
+Tap a row to expand the full report; tap the expanded image for a
+full-screen lightbox (click or × to close).
 
 If auto-registration of the resource fails (e.g. YAML-mode dashboards), add
 it manually: Settings → Dashboards → Resources → Add →

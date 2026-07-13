@@ -63,15 +63,20 @@ _Done since 2.3.1 (unreleased, next tag):_
   (`_structured_ok`) so it doesn't re-bill a doomed structured call each
   analysis. `_parse_ai_result` already handled both dict and str inputs.
 
+- **Auto-inherit camera area** ✅ (v2.4.0) — `_inherit_camera_areas` runs
+  after platform setup: fills each camera device's area from the source
+  camera entity's area (own, else its device's), only when unset so manual
+  placement is never overridden.
+- **Notification polish** ✅ (v2.4.0) — score-banded Android channel +
+  importance/priority (high alerts can ring through DND), iOS
+  interruption-level, per-camera `tag`, and a "Sound alarm" action button
+  (shown when an alarm panel is set) whose `mobile_app_notification_action`
+  is handled in `__init__` to trigger Alarmo.
+- **Card lightbox** ✅ (v2.4.0) — tapping the expanded alert image opens a
+  full-screen overlay (click / × to close). Frontend only.
+
 _Still open:_
 
-- **Auto-inherit camera area** — when a camera device is created, look up
-  the source camera entity's area (entity registry → its device/area) and
-  set the AI Camera Centre device to the same area, so it doesn't need
-  manual placement. Users can still override. Registry lookup at setup in
-  `__init__.async_setup_entry` (or via `DeviceInfo`); make it best-effort
-  (skip if the source entity has no area). Cameras are already assignable to
-  areas manually today (they're devices) — this is just convenience.
 - **Live card updates** — push new alerts to the Lovelace card over a
   websocket subscription instead of the current 5-minute poll, so an alert
   appears on the dashboard the moment it's logged.
