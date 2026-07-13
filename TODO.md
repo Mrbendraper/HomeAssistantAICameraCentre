@@ -56,6 +56,12 @@ _Done since 2.3.1 (unreleased, next tag):_
   action (brands check skipped, since brands ship bundled) on push/PR/weekly.
 - **Diagnostics** ✅ — `diagnostics.py` dumps options, cameras, targets and
   runtime state (no secrets to redact).
+- **Structured AI output** ✅ — `ai_task.generate_data` is called with a
+  `structure` (ALERT_STRUCTURE) so the provider returns validated fields
+  directly. Falls back to prompt-and-parse JSON for providers/entities
+  without structured support, and remembers the failure per session
+  (`_structured_ok`) so it doesn't re-bill a doomed structured call each
+  analysis. `_parse_ai_result` already handled both dict and str inputs.
 
 _Still open:_
 

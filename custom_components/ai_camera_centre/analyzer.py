@@ -70,7 +70,9 @@ DEFAULT_SCENE_CONTEXT = (
     'is visible in the images, use "n/a" for gate_state and gate_risk.'
 )
 
-PROMPT_TEMPLATE = """\
+# Shared analysis guidance. Field formats are enforced by ALERT_STRUCTURE
+# (structured mode) or by JSON_OUTPUT_SUFFIX (text-parsing fallback).
+ANALYSIS_INSTRUCTIONS = """\
 Motion has been detected by a camera at a residential property. You are being
 shown {count} images taken {interval} apart, in chronological order. Compare
 the images and describe what caused the motion.
@@ -78,37 +80,90 @@ the images and describe what caused the motion.
 SCENE CONTEXT: {scene_context}
 
 Determine direction of travel using ONLY the apparent size change of the
-subject across the frames: Subject appears LARGER in later frames = moving
-TOWARD the camera = "towards house" (approaching). Subject appears SMALLER in
-later frames = moving AWAY FROM the camera = "away from house" (leaving).
-Cannot determine = "unknown".
+subject across the frames: subject appears LARGER in later frames = moving
+TOWARD the camera = "towards house" (approaching); SMALLER = moving AWAY =
+"away from house" (leaving); cannot determine = "unknown".
 
-Analyse the images and respond ONLY with a valid JSON object with these
-fields: "short": A single sentence of maximum 80 characters for a phone
-notification banner. If suspicious_index is 6 or above, start with
-"⚠️ ALERT: ". "detail": A 2-3 sentence description including appearance,
-direction of movement, what they are carrying or doing, and any notable
-behaviour. "direction": One of "towards house", "away from house",
-"stationary", or "unknown". "carrying": Brief description of anything being
-carried or held, or "nothing visible". "activity": Brief description of what
-the subject appears to be doing, e.g. "walking towards the house", "standing
-at the gate", "running", "loitering". "gate_state": One of "open", "closed",
-or "unknown". If the scene context states there is no gate, use "n/a".
-"gate_risk": A brief sentence assessing whether the gate state combined with
-the detected motion poses a risk, e.g. an open gate with an animal nearby, or
-a closed gate being approached by a person. If the scene context states there
-is no gate, use "n/a". "suspicious_index": A number from 1 to 10. 1 =
-completely benign (e.g. a cat walking past). 10 = highly suspicious (e.g. a
-person in dark clothing with tools approaching the house at night). Consider
-direction, activity, what is being carried, time of day, and gate state when
-scoring. If you see no obvious cause of motion, respond with: {{"short": "No
-obvious motion detected", "detail": "No obvious motion detected",
-"direction": "unknown", "carrying": "unknown", "activity": "unknown",
-"gate_state": "<open or closed if a gate is visible, otherwise n/a>",
-"gate_risk": "<assess the gate risk if a gate is visible, otherwise n/a>",
-"suspicious_index": 1}}. Only use "gate_state": "unknown" if the scene has a
-gate but it is not visible in the images. Do not include any text outside the
-JSON object."""
+Score suspicion from 1 to 10: 1 = completely benign (e.g. a cat walking
+past); 10 = highly suspicious (e.g. a person in dark clothing with tools
+approaching the house at night). Consider direction, activity, what is being
+carried, time of day and gate state. If the score is 6 or above, begin the
+short summary with "⚠️ ALERT: ".
+
+If you see no obvious cause of motion, set both the short summary and the
+detailed description to "No obvious motion detected" and the score to 1."""
+
+# Appended only in the text-parsing fallback (providers without structured
+# output). Structured mode gets the same field spec via ALERT_STRUCTURE.
+JSON_OUTPUT_SUFFIX = """
+
+Respond ONLY with a valid JSON object with these fields: "short" (string, max
+80 characters), "detail" (string), "direction" (one of "towards house", "away
+from house", "stationary", "unknown"), "carrying" (string), "activity"
+(string), "gate_state" (one of "open", "closed", "unknown", "n/a" — use "n/a"
+when the scene has no gate and "unknown" only when a gate exists but is not
+visible), "gate_risk" (string, or "n/a"), "suspicious_index" (integer 1-10).
+Do not include any text outside the JSON object."""
+
+# Schema passed to ai_task.generate_data's `structure` parameter so the
+# provider returns validated fields directly (no prompt-and-parse).
+ALERT_STRUCTURE = {
+    "short": {
+        "description": "One sentence, max 80 characters, for a notification.",
+        "selector": {"text": {}},
+    },
+    "detail": {
+        "description": (
+            "2-3 sentences: appearance, direction of movement, what is being "
+            "carried or done, and any notable behaviour."
+        ),
+        "selector": {"text": {"multiline": True}},
+    },
+    "direction": {
+        "description": "Direction of travel relative to the house.",
+        "selector": {
+            "select": {
+                "options": [
+                    "towards house",
+                    "away from house",
+                    "stationary",
+                    "unknown",
+                ]
+            }
+        },
+    },
+    "carrying": {
+        "description": "Anything being carried or held, or 'nothing visible'.",
+        "selector": {"text": {}},
+    },
+    "activity": {
+        "description": (
+            "What the subject appears to be doing, e.g. 'walking towards the "
+            "house', 'standing at the gate', 'loitering'."
+        ),
+        "selector": {"text": {}},
+    },
+    "gate_state": {
+        "description": (
+            "Gate state. Use 'n/a' if the scene has no gate; 'unknown' only "
+            "if a gate exists but is not visible in the images."
+        ),
+        "selector": {
+            "select": {"options": ["open", "closed", "unknown", "n/a"]}
+        },
+    },
+    "gate_risk": {
+        "description": (
+            "One sentence assessing risk from the gate state combined with "
+            "the motion, or 'n/a' if there is no gate."
+        ),
+        "selector": {"text": {}},
+    },
+    "suspicious_index": {
+        "description": "Suspicion score, 1 (benign) to 10 (highly suspicious).",
+        "selector": {"number": {"min": 1, "max": 10}},
+    },
+}
 
 
 def _write_file(path: str, data: bytes) -> None:
@@ -197,6 +252,9 @@ class CameraPipeline:
         self.log_window_end = global_options.get(CONF_LOG_WINDOW_END)
         # runtime state (survives pipeline rebuilds via the switch entity)
         self.paused = False
+        # set False after the first structured-output failure so we don't
+        # retry (and re-bill) it every analysis this session
+        self._structured_ok = True
         self._lock = asyncio.Lock()
         self._last_run = 0.0
 
@@ -378,13 +436,13 @@ class CameraPipeline:
             f"{self.snapshot_interval:g} second"
             f"{'s' if self.snapshot_interval != 1 else ''}"
         )
-        service_data: dict[str, Any] = {
+        instructions = ANALYSIS_INSTRUCTIONS.format(
+            count=len(paths),
+            interval=interval,
+            scene_context=self.scene_context,
+        )
+        base: dict[str, Any] = {
             "task_name": f"{self.label} analysis",
-            "instructions": PROMPT_TEMPLATE.format(
-                count=len(paths),
-                interval=interval,
-                scene_context=self.scene_context,
-            ),
             "attachments": [
                 {
                     "media_content_id": (
@@ -396,7 +454,35 @@ class CameraPipeline:
             ],
         }
         if self.ai_task_entity:
-            service_data["entity_id"] = self.ai_task_entity
+            base["entity_id"] = self.ai_task_entity
+
+        # Prefer schema-enforced structured output; fall back to prompt-and-
+        # parse for providers/entities that don't support a structure.
+        if self._structured_ok:
+            try:
+                data = await self._call_ai_task(
+                    {
+                        **base,
+                        "instructions": instructions,
+                        "structure": ALERT_STRUCTURE,
+                    }
+                )
+                return _parse_ai_result(data)
+            except Exception as err:  # noqa: BLE001 - structure unsupported
+                _LOGGER.info(
+                    "%s: structured AI output unavailable (%s); using text "
+                    "parsing for the rest of this session",
+                    self.camera_id,
+                    err,
+                )
+                self._structured_ok = False
+
+        data = await self._call_ai_task(
+            {**base, "instructions": instructions + JSON_OUTPUT_SUFFIX}
+        )
+        return _parse_ai_result(data)
+
+    async def _call_ai_task(self, service_data: dict[str, Any]) -> Any:
         result = await self.hass.services.async_call(
             "ai_task",
             "generate_data",
@@ -406,7 +492,7 @@ class CameraPipeline:
         )
         if not isinstance(result, dict) or "data" not in result:
             raise HomeAssistantError(f"Unexpected ai_task response: {result!r}")
-        return _parse_ai_result(result["data"])
+        return result["data"]
 
     async def _notify(self, report: dict[str, Any], image_url: str) -> None:
         for target in self.targets:

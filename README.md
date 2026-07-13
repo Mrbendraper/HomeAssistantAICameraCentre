@@ -168,9 +168,11 @@ Event data: `camera_id`, `camera_label`, `score` (1–10), `short`, `detail`,
    prevents alert storms)
 2. A burst of snapshots is captured from the camera stream (count and
    interval configurable; default 5 shots, 500 ms apart)
-3. The frames go to `ai_task.generate_data` with a structured prompt plus
-   your per-camera scene context; the AI compares frames to determine what
-   moved, in which direction, and how suspicious it looks (1–10)
+3. The frames go to `ai_task.generate_data` with your per-camera scene
+   context; the AI compares frames to determine what moved, in which
+   direction, and how suspicious it looks (1–10). Responses use
+   schema-enforced structured output where the provider supports it, and
+   fall back to prompt-and-parse JSON otherwise
 4. "No obvious motion" results are dropped. Remaining alerts are checked
    against the logging rules (minimum score + optional time window); alerts
    that pass are archived (image + full report) and shown on the card
