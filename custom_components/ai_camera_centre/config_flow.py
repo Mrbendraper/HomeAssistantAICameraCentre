@@ -20,6 +20,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -30,17 +31,24 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
+    TimeSelector,
 )
 from homeassistant.util import slugify
 
 from .const import (
     CONF_AI_TASK_ENTITY,
+    CONF_ALARM_PANEL_ENTITY,
+    CONF_ALARMO_ENABLED,
+    CONF_ALARMO_TRIGGER_SCORE,
     CONF_ALERT_TARGETS,
     CONF_CAMERA_ENTITY,
     CONF_CAMERA_NAME,
     CONF_CAMERAS,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
+    CONF_LOG_WINDOW_END,
+    CONF_LOG_WINDOW_START,
+    CONF_MIN_LOG_SCORE,
     CONF_MOTION_ENTITIES,
     CONF_MOTION_ENTITY,
     CONF_RETENTION_DAYS,
@@ -48,14 +56,22 @@ from .const import (
     CONF_SNAPSHOT_COUNT,
     CONF_SNAPSHOT_INTERVAL_MS,
     CONF_TARGET_CAMERAS,
+    CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_SERVICE,
+    DEFAULT_ALARMO_TRIGGER_SCORE,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
+    DEFAULT_MIN_LOG_SCORE,
     DEFAULT_RETENTION_DAYS,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
+    DEFAULT_TARGET_CONDITION,
     DOMAIN,
+    NOTIFY_ALWAYS,
+    NOTIFY_ARMED,
+    NOTIFY_AWAY,
+    NOTIFY_AWAY_OR_ARMED,
 )
 
 MOTION_DOMAINS = ["binary_sensor", "input_boolean", "switch"]
@@ -65,7 +81,24 @@ INT_SETTINGS = (
     CONF_SNAPSHOT_COUNT,
     CONF_SNAPSHOT_INTERVAL_MS,
     CONF_COOLDOWN_SECONDS,
+    CONF_ALARMO_TRIGGER_SCORE,
+    CONF_MIN_LOG_SCORE,
 )
+
+# Optional settings that must be cleared when the user empties them.
+OPTIONAL_SETTINGS = (
+    CONF_AI_TASK_ENTITY,
+    CONF_ALARM_PANEL_ENTITY,
+    CONF_LOG_WINDOW_START,
+    CONF_LOG_WINDOW_END,
+)
+
+NOTIFY_CONDITIONS = [
+    {"value": NOTIFY_ALWAYS, "label": "Always"},
+    {"value": NOTIFY_AWAY, "label": "Only when nobody is home"},
+    {"value": NOTIFY_ARMED, "label": "Only when the alarm is armed"},
+    {"value": NOTIFY_AWAY_OR_ARMED, "label": "When away or armed"},
+]
 
 
 def _settings_schema(options: dict[str, Any]) -> vol.Schema:
@@ -112,6 +145,42 @@ def _settings_schema(options: dict[str, Any]) -> vol.Schema:
                     "suggested_value": _get(CONF_AI_TASK_ENTITY, None)
                 },
             ): EntitySelector(EntitySelectorConfig(domain="ai_task")),
+            vol.Optional(
+                CONF_ALARM_PANEL_ENTITY,
+                description={
+                    "suggested_value": _get(CONF_ALARM_PANEL_ENTITY, None)
+                },
+            ): EntitySelector(
+                EntitySelectorConfig(domain="alarm_control_panel")
+            ),
+            vol.Required(
+                CONF_MIN_LOG_SCORE,
+                default=_get(CONF_MIN_LOG_SCORE, DEFAULT_MIN_LOG_SCORE),
+            ): NumberSelector(
+                NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+            ),
+            vol.Optional(
+                CONF_LOG_WINDOW_START,
+                description={
+                    "suggested_value": _get(CONF_LOG_WINDOW_START, None)
+                },
+            ): TimeSelector(),
+            vol.Optional(
+                CONF_LOG_WINDOW_END,
+                description={
+                    "suggested_value": _get(CONF_LOG_WINDOW_END, None)
+                },
+            ): TimeSelector(),
+            vol.Required(
+                CONF_ALARMO_ENABLED,
+                default=_get(CONF_ALARMO_ENABLED, False),
+            ): BooleanSelector(),
+            vol.Required(
+                CONF_ALARMO_TRIGGER_SCORE,
+                default=_get(CONF_ALARMO_TRIGGER_SCORE, DEFAULT_ALARMO_TRIGGER_SCORE),
+            ): NumberSelector(
+                NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+            ),
         }
     )
 
@@ -186,6 +255,15 @@ def _target_schema(
             ): NumberSelector(
                 NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
             ),
+            vol.Required(
+                CONF_TARGET_CONDITION,
+                default=target.get(CONF_TARGET_CONDITION, DEFAULT_TARGET_CONDITION),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=NOTIFY_CONDITIONS,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
             vol.Optional(
                 CONF_TARGET_CAMERAS,
                 description={
@@ -221,6 +299,9 @@ def _clean_target(user_input: dict[str, Any]) -> dict[str, Any]:
     return {
         CONF_TARGET_SERVICE: str(user_input[CONF_TARGET_SERVICE]).strip(),
         CONF_TARGET_MIN_SCORE: int(user_input[CONF_TARGET_MIN_SCORE]),
+        CONF_TARGET_CONDITION: user_input.get(
+            CONF_TARGET_CONDITION, DEFAULT_TARGET_CONDITION
+        ),
         CONF_TARGET_CAMERAS: user_input.get(CONF_TARGET_CAMERAS, []),
     }
 
@@ -445,8 +526,9 @@ class AICameraCentreOptionsFlow(OptionsFlow):
         if user_input is not None:
             options = self._options
             options.update(_clean_settings(user_input))
-            if CONF_AI_TASK_ENTITY not in user_input:
-                options.pop(CONF_AI_TASK_ENTITY, None)
+            for key in OPTIONAL_SETTINGS:
+                if key not in user_input:
+                    options.pop(key, None)
             return self.async_create_entry(data=options)
         return self.async_show_form(
             step_id="settings",

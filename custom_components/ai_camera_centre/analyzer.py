@@ -20,25 +20,41 @@ from homeassistant.components import camera
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.util import dt as dt_util
 
 from .const import (
+    ARMED_STATES,
     CONF_AI_TASK_ENTITY,
+    CONF_ALARM_PANEL_ENTITY,
+    CONF_ALARMO_ENABLED,
+    CONF_ALARMO_TRIGGER_SCORE,
     CONF_CAMERA_ENTITY,
     CONF_CAMERA_NAME,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
+    CONF_LOG_WINDOW_END,
+    CONF_LOG_WINDOW_START,
+    CONF_MIN_LOG_SCORE,
     CONF_SCENE_CONTEXT,
     CONF_SNAPSHOT_COUNT,
     CONF_SNAPSHOT_INTERVAL_MS,
     CONF_TARGET_CAMERAS,
+    CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_SERVICE,
+    DEFAULT_ALARMO_TRIGGER_SCORE,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
+    DEFAULT_MIN_LOG_SCORE,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
+    DEFAULT_TARGET_CONDITION,
     DOMAIN,
+    NOTIFY_ARMED,
+    NOTIFY_AWAY,
+    NOTIFY_AWAY_OR_ARMED,
     SIGNAL_NEW_ALERT,
+    SNAPSHOTS_URL,
 )
 
 if TYPE_CHECKING:
@@ -164,6 +180,20 @@ class CameraPipeline:
             CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH
         )
         self.ai_task_entity = global_options.get(CONF_AI_TASK_ENTITY)
+        # presence / alarm
+        self.alarm_panel_entity = global_options.get(CONF_ALARM_PANEL_ENTITY)
+        self.alarmo_enabled = bool(global_options.get(CONF_ALARMO_ENABLED, False))
+        self.alarmo_trigger_score = int(
+            global_options.get(
+                CONF_ALARMO_TRIGGER_SCORE, DEFAULT_ALARMO_TRIGGER_SCORE
+            )
+        )
+        # selective logging
+        self.min_log_score = int(
+            global_options.get(CONF_MIN_LOG_SCORE, DEFAULT_MIN_LOG_SCORE)
+        )
+        self.log_window_start = global_options.get(CONF_LOG_WINDOW_START)
+        self.log_window_end = global_options.get(CONF_LOG_WINDOW_END)
         self._lock = asyncio.Lock()
         self._last_run = 0.0
 
@@ -191,28 +221,119 @@ class CameraPipeline:
                 return
             self._last_run = time.monotonic()
             try:
-                await self._run()
+                await self._run(force=force)
             except Exception:  # noqa: BLE001 - never break the listener
                 _LOGGER.exception("%s: camera analysis failed", self.camera_id)
 
     # -- pipeline steps ---------------------------------------------------
 
-    async def _run(self) -> None:
+    async def _run(self, force: bool = False) -> None:
         paths = await self._capture_frames()
         report = await self._analyze_frames(paths)
         if NO_MOTION_MARKER in report["short"].lower():
             _LOGGER.debug("%s: AI saw no significant motion", self.camera_id)
             return
-        record = await self.store.async_log(
-            {
-                "camera_id": self.camera_id,
-                "camera_label": self.label,
-                "image_path": paths[len(paths) // 2],
-                **report,
-            }
+        mid_path = paths[len(paths) // 2]
+
+        # Logging rules gate only what enters the history / the card. A
+        # filtered-out alert can still notify and trip Alarmo (using the
+        # transient snapshot image), so a real threat is never silently
+        # dropped just because it fell outside the logging window.
+        if force or self._should_log(report):
+            record = await self.store.async_log(
+                {
+                    "camera_id": self.camera_id,
+                    "camera_label": self.label,
+                    "image_path": mid_path,
+                    **report,
+                }
+            )
+            async_dispatcher_send(self.hass, SIGNAL_NEW_ALERT, record)
+            image_url = record["image"]
+        else:
+            _LOGGER.debug(
+                "%s: alert (score %s) not archived (logging rules)",
+                self.camera_id,
+                report["score"],
+            )
+            image_url = f"{SNAPSHOTS_URL}/{os.path.basename(mid_path)}"
+
+        await self._maybe_trigger_alarmo(report)
+        await self._notify(report, image_url)
+
+    # -- selective logging (min score + time window) ---------------------
+
+    def _should_log(self, report: dict[str, Any]) -> bool:
+        if report["score"] < self.min_log_score:
+            return False
+        return self._within_log_window()
+
+    def _within_log_window(self) -> bool:
+        if not (self.log_window_start and self.log_window_end):
+            return True
+        start = dt_util.parse_time(self.log_window_start)
+        end = dt_util.parse_time(self.log_window_end)
+        if start is None or end is None or start == end:
+            return True
+        now_t = dt_util.now().time()
+        if start < end:
+            return start <= now_t < end
+        # window wraps past midnight (e.g. 22:00 -> 06:00)
+        return now_t >= start or now_t < end
+
+    # -- presence / alarm state ------------------------------------------
+
+    def _anyone_home(self) -> bool:
+        """True if any person entity is home. False if none exist (fail open)."""
+        return any(
+            state.state == "home" for state in self.hass.states.async_all("person")
         )
-        async_dispatcher_send(self.hass, SIGNAL_NEW_ALERT, record)
-        await self._notify(report, record)
+
+    def _is_armed(self) -> bool:
+        if not self.alarm_panel_entity:
+            return False
+        state = self.hass.states.get(self.alarm_panel_entity)
+        return state is not None and state.state in ARMED_STATES
+
+    def _condition_met(self, condition: str) -> bool:
+        if condition == NOTIFY_AWAY:
+            return not self._anyone_home()
+        if condition == NOTIFY_ARMED:
+            return self._is_armed()
+        if condition == NOTIFY_AWAY_OR_ARMED:
+            return not self._anyone_home() or self._is_armed()
+        return True  # NOTIFY_ALWAYS / unknown
+
+    # -- alarmo ----------------------------------------------------------
+
+    async def _maybe_trigger_alarmo(self, report: dict[str, Any]) -> None:
+        """Trip Alarmo on a high-risk alert, but only while already armed."""
+        if not self.alarmo_enabled or not self.alarm_panel_entity:
+            return
+        if report["score"] < self.alarmo_trigger_score:
+            return
+        if not self._is_armed():
+            _LOGGER.debug(
+                "%s: score %s >= Alarmo threshold but panel not armed; skipping",
+                self.camera_id,
+                report["score"],
+            )
+            return
+        try:
+            await self.hass.services.async_call(
+                "alarmo",
+                "trigger",
+                {"entity_id": self.alarm_panel_entity},
+                blocking=False,
+            )
+            _LOGGER.warning(
+                "%s: triggered Alarmo (%s) on score %s",
+                self.camera_id,
+                self.alarm_panel_entity,
+                report["score"],
+            )
+        except Exception:  # noqa: BLE001 - alarmo missing / API change
+            _LOGGER.exception("%s: failed to trigger Alarmo", self.camera_id)
 
     async def _capture_frames(self) -> list[str]:
         paths: list[str] = []
@@ -262,12 +383,15 @@ class CameraPipeline:
             raise HomeAssistantError(f"Unexpected ai_task response: {result!r}")
         return _parse_ai_result(result["data"])
 
-    async def _notify(self, report: dict[str, Any], record: dict[str, Any]) -> None:
+    async def _notify(self, report: dict[str, Any], image_url: str) -> None:
         for target in self.targets:
             if report["score"] < int(target.get(CONF_TARGET_MIN_SCORE, 1)):
                 continue
             cameras = target.get(CONF_TARGET_CAMERAS) or []
             if cameras and self.camera_id not in cameras:
+                continue
+            condition = target.get(CONF_TARGET_CONDITION, DEFAULT_TARGET_CONDITION)
+            if not self._condition_met(condition):
                 continue
             service = str(target[CONF_TARGET_SERVICE]).removeprefix("notify.")
             try:
@@ -278,7 +402,7 @@ class CameraPipeline:
                         "title": f"{self.label} Motion [{report['score']}/10]",
                         "message": report["short"],
                         "data": {
-                            "image": record["image"],
+                            "image": image_url,
                             "clickAction": self.dashboard_path,
                         },
                     },

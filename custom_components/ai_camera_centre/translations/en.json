@@ -10,7 +10,13 @@
           "snapshot_interval_ms": "Snapshot interval (ms)",
           "cooldown_seconds": "Cooldown between analyses per camera (seconds)",
           "dashboard_path": "Dashboard path opened by notifications",
-          "ai_task_entity": "AI Task entity (blank = Home Assistant's default)"
+          "ai_task_entity": "AI Task entity (blank = Home Assistant's default)",
+          "alarm_panel_entity": "Alarm panel (optional — enables the 'armed' notify conditions and Alarmo triggering)",
+          "min_log_score": "Minimum score to log an alert (1 = log every real alert)",
+          "log_window_start": "Only log alerts after this time (optional)",
+          "log_window_end": "Only log alerts before this time (optional)",
+          "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
+          "alarmo_trigger_score": "Score at or above which Alarmo is triggered"
         }
       }
     },
@@ -66,10 +72,11 @@
       },
       "add_target": {
         "title": "Add alert target",
-        "description": "An alert target is a notify service that receives camera alerts. Set the minimum suspicion score it should be woken for, and optionally restrict it to specific cameras (none selected = all cameras).",
+        "description": "An alert target is a notify service that receives camera alerts. Set the minimum suspicion score it should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
         "data": {
           "service": "Notify service",
           "min_score": "Minimum suspicion score to notify (1 = every alert)",
+          "notify_condition": "When to notify this target",
           "cameras": "Only alert for these cameras (blank = all)"
         }
       },
@@ -81,10 +88,11 @@
       },
       "edit_target_details": {
         "title": "Edit alert target",
-        "description": "Set the minimum suspicion score this target should be woken for, and optionally restrict it to specific cameras (none selected = all cameras).",
+        "description": "Set the minimum suspicion score this target should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
         "data": {
           "service": "Notify service",
           "min_score": "Minimum suspicion score to notify (1 = every alert)",
+          "notify_condition": "When to notify this target",
           "cameras": "Only alert for these cameras (blank = all)"
         }
       },
@@ -96,13 +104,20 @@
       },
       "settings": {
         "title": "Settings",
+        "description": "The 'armed' notify conditions and Alarmo triggering both need an alarm panel selected. Time-window logging only records alerts within the chosen hours (leave blank to log at any time).",
         "data": {
           "retention_days": "Alert retention (days)",
           "snapshot_count": "Snapshots per analysis",
           "snapshot_interval_ms": "Snapshot interval (ms)",
           "cooldown_seconds": "Cooldown between analyses per camera (seconds)",
           "dashboard_path": "Dashboard path opened by notifications",
-          "ai_task_entity": "AI Task entity (blank = Home Assistant's default)"
+          "ai_task_entity": "AI Task entity (blank = Home Assistant's default)",
+          "alarm_panel_entity": "Alarm panel (optional — enables the 'armed' notify conditions and Alarmo triggering)",
+          "min_log_score": "Minimum score to log an alert (1 = log every real alert)",
+          "log_window_start": "Only log alerts after this time (optional)",
+          "log_window_end": "Only log alerts before this time (optional)",
+          "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
+          "alarmo_trigger_score": "Score at or above which Alarmo is triggered"
         }
       }
     },

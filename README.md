@@ -18,9 +18,17 @@ card.
   scene description that is injected into the AI prompt (e.g. "a gate is
   visible; subjects behind the gate are likely arriving").
 - **Alert targets** — add notify services the same way you add cameras.
-  Each target has its own minimum suspicion score and an optional camera
-  filter, so one phone can get every event while another is only woken for
-  high-risk alerts on selected cameras.
+  Each target has its own minimum suspicion score, an optional camera
+  filter, and a **notify condition** (always / only when nobody's home /
+  only when the alarm is armed / away-or-armed), so one phone can get every
+  event while another is only woken for high-risk alerts when you're out.
+- **Alarmo integration** — optionally trip
+  [Alarmo](https://github.com/nielsfaber/alarmo) when a high-risk alert
+  lands while the alarm is already armed, so the AI can sound the siren,
+  not just ping a phone.
+- **Selective logging** — keep the history clean: only archive alerts at or
+  above a minimum score, and/or only during a chosen time window (e.g.
+  nighttime only).
 - **AI-powered reports** via Home Assistant's `ai_task` — works with any
   configured AI provider (Google Generative AI, OpenAI, Ollama, ...).
   Each alert includes a short notification line, detailed description,
@@ -80,8 +88,16 @@ Copy `custom_components/ai_camera_centre/` into your
      (e.g. `notify.mobile_app_your_phone`)
    - **Minimum suspicion score** — 1 sends every alert; 6+ only wakes this
      target for genuinely suspicious events
+   - **When to notify** — always, or only when nobody's home / the alarm is
+     armed / either (the armed options need an alarm panel set in Settings)
    - **Cameras** — optionally restrict this target to specific cameras
-4. Repeat for each camera and target. That's it — walk in front of a camera
+4. Optional, in Configure → **Settings**:
+   - **Alarm panel** — pick your `alarm_control_panel.*` to enable the armed
+     notify conditions and Alarmo triggering
+   - **Minimum score to log** / **log time window** — keep low-risk or
+     daytime noise out of the history
+   - **Trigger Alarmo** — sound Alarmo on high-risk alerts while armed
+5. Repeat for each camera and target. That's it — walk in front of a camera
    to test, or call the service manually:
 
 ```yaml
@@ -117,10 +133,30 @@ URL `/ai_camera_centre/ai-camera-centre-card.js`, type **JavaScript module**.
 3. The frames go to `ai_task.generate_data` with a structured prompt plus
    your per-camera scene context; the AI compares frames to determine what
    moved, in which direction, and how suspicious it looks (1–10)
-4. "No obvious motion" results are dropped; real alerts are archived
-   (image + full report) and shown on the card
-5. Every alert target whose minimum score and camera filter match gets the
-   summary, the image, and a tap-through to your dashboard
+4. "No obvious motion" results are dropped. Remaining alerts are checked
+   against the logging rules (minimum score + optional time window); alerts
+   that pass are archived (image + full report) and shown on the card
+5. If Alarmo triggering is enabled and the score meets the threshold while
+   the panel is armed, Alarmo is tripped
+6. Every alert target whose minimum score, camera filter and notify
+   condition (presence / armed state) all match gets the summary, the
+   image, and a tap-through to your dashboard
+
+Notes on the filters — the logging rules and the notification rules are
+independent, by design:
+
+- The **logging rules** (minimum score to log, time window) decide only
+  what enters the **history and the card**. An alert filtered out here is
+  *not* archived, but it can still notify and trigger Alarmo — so a genuine
+  threat is never silently dropped just because it fell outside your
+  "nighttime only" logging window. Its notification simply uses the
+  temporary snapshot image rather than an archived one.
+- The **notification rules** (each target's minimum score, camera filter
+  and notify condition) decide who gets pushed. So you can, for example,
+  keep your history to nighttime events only while still being notified of
+  daytime threats when you're away.
+- "Nobody home" is true when no `person.*` entity is in the `home` zone; if
+  you have no person entities at all it is treated as away (fail open).
 
 Storage lives in `<config>/ai_camera_centre/` (JSONL log + images). Data
 from the previous *Alert History* version of this integration is migrated
