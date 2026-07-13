@@ -2,7 +2,7 @@
 
 ## Shipped
 
-- **2.5.0** (unreleased) — Known visitors (household members / regulars as a
+- **2.5.0** — Known visitors (household members / regulars as a
   `known_visitor` subentry, injected into the prompt; recognised name
   recorded as `known_person`). Repeat-visitor context (recent alerts fed
   back into the prompt for loitering / return detection).

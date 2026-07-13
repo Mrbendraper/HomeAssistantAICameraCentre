@@ -3,7 +3,7 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
-## [2.5.0] — unreleased
+## [2.5.0]
 
 ### Added
 - **Known visitors** — add household members and regulars (name +
