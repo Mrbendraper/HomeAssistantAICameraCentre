@@ -53,7 +53,7 @@ card.
 ### HACS (custom repository)
 
 1. HACS → ⋮ → Custom repositories
-2. Repository: `https://github.com/Mrbendraper/HomeAssistantAICameraCentre`,
+2. Repository: `https://github.com/simpleaddins/HomeAssistantAICameraCentre`,
    type: **Integration**
 3. Install **AI Camera Centre**, restart Home Assistant
 
@@ -162,10 +162,12 @@ Settings.
 isn't filtering the alert out, and that its camera filter (if any) includes
 the camera. Each delivery failure is logged.
 
-**No integration icon** — custom integration icons are served from the
-central [home-assistant/brands](https://github.com/home-assistant/brands)
-repository, not from this repo; see
-[docs/BRANDING.md](docs/BRANDING.md) for the one-time submission.
+**No integration icon** — the icon ships inside the integration
+(`custom_components/ai_camera_centre/brand/`) and is picked up
+automatically on Home Assistant **2026.3 or newer**; older versions show
+the default placeholder. If you're on 2026.3+ and still see the
+placeholder, hard-refresh the browser / reset the companion app's
+frontend cache. Details in [docs/BRANDING.md](docs/BRANDING.md).
 
 ## Releasing (maintainers)
 

@@ -6,10 +6,11 @@ housing + wordmark use the Simple Addins navy, so the add-in reads as part
 of the same family as simpleaddins.com.
 
 Outputs (relative to the repo root, run from anywhere):
-- brand/ai_camera_centre/ - icon.png 256, icon@2x.png 512, logo.png
-  (<=512 wide, 128 high), logo@2x.png (exactly double) - sized to pass
-  the home-assistant/brands CI checks, ready to copy into a brands PR
-  (see docs/BRANDING.md).
+- custom_components/ai_camera_centre/brand/ - icon.png 256, icon@2x.png
+  512, logo.png (<=512 wide, 128 high), logo@2x.png (exactly double).
+  Since HA 2026.3 these are served directly from the integration via the
+  brands proxy API - no home-assistant/brands PR needed (see
+  docs/BRANDING.md).
 - assets/logo-wide.png - larger wordmark used in the README header.
 
 Requires Pillow and the Segoe UI Bold font (any Windows machine).
@@ -18,7 +19,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont
 import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "brand", "ai_camera_centre")
+OUT = os.path.join(ROOT, "custom_components", "ai_camera_centre", "brand")
 ASSETS = os.path.join(ROOT, "assets")
 FONT_PATH = r"C:\Windows\Fonts\segoeuib.ttf"
 

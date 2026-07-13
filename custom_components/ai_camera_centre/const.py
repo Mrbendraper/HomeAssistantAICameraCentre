@@ -1,7 +1,7 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 # -- global options ------------------------------------------------------
 CONF_RETENTION_DAYS = "retention_days"

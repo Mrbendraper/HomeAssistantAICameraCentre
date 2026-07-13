@@ -1,15 +1,15 @@
 {
   "domain": "ai_camera_centre",
   "name": "AI Camera Centre",
-  "codeowners": ["@Mrbendraper"],
+  "codeowners": ["@simpleaddins"],
   "config_flow": true,
   "dependencies": ["http", "websocket_api", "camera", "ai_task", "media_source"],
   "after_dependencies": ["lovelace"],
-  "documentation": "https://github.com/Mrbendraper/HomeAssistantAICameraCentre",
+  "documentation": "https://github.com/simpleaddins/HomeAssistantAICameraCentre",
   "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/Mrbendraper/HomeAssistantAICameraCentre/issues",
+  "issue_tracker": "https://github.com/simpleaddins/HomeAssistantAICameraCentre/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "2.1.0"
+  "version": "2.1.1"
 }
