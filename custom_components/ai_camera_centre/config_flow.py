@@ -1,13 +1,12 @@
 """Config flow for AI Camera Centre.
 
-Initial setup collects the global settings; the options flow then
-manages cameras (add / edit / remove), alert targets (who gets notified,
-at what score, for which cameras) and settings from the integration's
-Configure button — no YAML required.
+Initial setup collects the global settings. After that the integration
+page offers native "Add camera" and "Add alert target" buttons (config
+subentries), and the Configure button opens the global settings — no YAML
+required and no nested options menu.
 """
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 import voluptuous as vol
@@ -16,7 +15,9 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
+    ConfigSubentryFlow,
     OptionsFlow,
+    SubentryFlowResult,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
@@ -40,10 +41,9 @@ from .const import (
     CONF_ALARM_PANEL_ENTITY,
     CONF_ALARMO_ENABLED,
     CONF_ALARMO_TRIGGER_SCORE,
-    CONF_ALERT_TARGETS,
     CONF_CAMERA_ENTITY,
+    CONF_CAMERA_ID,
     CONF_CAMERA_NAME,
-    CONF_CAMERAS,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
     CONF_LOG_WINDOW_END,
@@ -59,6 +59,7 @@ from .const import (
     CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_SERVICE,
+    CONFIG_ENTRY_VERSION,
     DEFAULT_ALARMO_TRIGGER_SCORE,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
@@ -72,6 +73,8 @@ from .const import (
     NOTIFY_ARMED,
     NOTIFY_AWAY,
     NOTIFY_AWAY_OR_ARMED,
+    SUBENTRY_CAMERA,
+    SUBENTRY_TARGET,
 )
 
 MOTION_DOMAINS = ["binary_sensor", "input_boolean", "switch"]
@@ -99,6 +102,9 @@ NOTIFY_CONDITIONS = [
     {"value": NOTIFY_ARMED, "label": "Only when the alarm is armed"},
     {"value": NOTIFY_AWAY_OR_ARMED, "label": "When away or armed"},
 ]
+
+
+# -- schema builders -----------------------------------------------------
 
 
 def _settings_schema(options: dict[str, Any]) -> vol.Schema:
@@ -141,18 +147,12 @@ def _settings_schema(options: dict[str, Any]) -> vol.Schema:
             ): TextSelector(),
             vol.Optional(
                 CONF_AI_TASK_ENTITY,
-                description={
-                    "suggested_value": _get(CONF_AI_TASK_ENTITY, None)
-                },
+                description={"suggested_value": _get(CONF_AI_TASK_ENTITY, None)},
             ): EntitySelector(EntitySelectorConfig(domain="ai_task")),
             vol.Optional(
                 CONF_ALARM_PANEL_ENTITY,
-                description={
-                    "suggested_value": _get(CONF_ALARM_PANEL_ENTITY, None)
-                },
-            ): EntitySelector(
-                EntitySelectorConfig(domain="alarm_control_panel")
-            ),
+                description={"suggested_value": _get(CONF_ALARM_PANEL_ENTITY, None)},
+            ): EntitySelector(EntitySelectorConfig(domain="alarm_control_panel")),
             vol.Required(
                 CONF_MIN_LOG_SCORE,
                 default=_get(CONF_MIN_LOG_SCORE, DEFAULT_MIN_LOG_SCORE),
@@ -161,15 +161,11 @@ def _settings_schema(options: dict[str, Any]) -> vol.Schema:
             ),
             vol.Optional(
                 CONF_LOG_WINDOW_START,
-                description={
-                    "suggested_value": _get(CONF_LOG_WINDOW_START, None)
-                },
+                description={"suggested_value": _get(CONF_LOG_WINDOW_START, None)},
             ): TimeSelector(),
             vol.Optional(
                 CONF_LOG_WINDOW_END,
-                description={
-                    "suggested_value": _get(CONF_LOG_WINDOW_END, None)
-                },
+                description={"suggested_value": _get(CONF_LOG_WINDOW_END, None)},
             ): TimeSelector(),
             vol.Required(
                 CONF_ALARMO_ENABLED,
@@ -200,9 +196,7 @@ def _camera_schema(camera: dict[str, Any] | None = None) -> vol.Schema:
             ): TextSelector(),
             vol.Required(
                 CONF_CAMERA_ENTITY,
-                description={
-                    "suggested_value": camera.get(CONF_CAMERA_ENTITY)
-                },
+                description={"suggested_value": camera.get(CONF_CAMERA_ENTITY)},
             ): EntitySelector(EntitySelectorConfig(domain="camera")),
             vol.Optional(
                 CONF_MOTION_ENTITIES,
@@ -212,9 +206,7 @@ def _camera_schema(camera: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Optional(
                 CONF_SCENE_CONTEXT,
-                description={
-                    "suggested_value": camera.get(CONF_SCENE_CONTEXT, "")
-                },
+                description={"suggested_value": camera.get(CONF_SCENE_CONTEXT, "")},
             ): TextSelector(TextSelectorConfig(multiline=True)),
         }
     )
@@ -245,9 +237,7 @@ def _target_schema(
         {
             vol.Required(
                 CONF_TARGET_SERVICE,
-                description={
-                    "suggested_value": target.get(CONF_TARGET_SERVICE)
-                },
+                description={"suggested_value": target.get(CONF_TARGET_SERVICE)},
             ): _notify_service_selector(hass),
             vol.Required(
                 CONF_TARGET_MIN_SCORE,
@@ -266,9 +256,7 @@ def _target_schema(
             ),
             vol.Optional(
                 CONF_TARGET_CAMERAS,
-                description={
-                    "suggested_value": target.get(CONF_TARGET_CAMERAS, [])
-                },
+                description={"suggested_value": target.get(CONF_TARGET_CAMERAS, [])},
             ): SelectSelector(
                 SelectSelectorConfig(
                     options=[
@@ -286,13 +274,27 @@ def _target_schema(
     )
 
 
+# -- cleaners ------------------------------------------------------------
+
+
 def _clean_settings(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Coerce number selector floats to ints."""
     cleaned = dict(user_input)
     for key in INT_SETTINGS:
         if key in cleaned:
             cleaned[key] = int(cleaned[key])
     return cleaned
+
+
+def _clean_camera(user_input: dict[str, Any], camera_id: str) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        CONF_CAMERA_ID: camera_id,
+        CONF_CAMERA_NAME: user_input[CONF_CAMERA_NAME],
+        CONF_CAMERA_ENTITY: user_input[CONF_CAMERA_ENTITY],
+        CONF_MOTION_ENTITIES: user_input.get(CONF_MOTION_ENTITIES, []),
+    }
+    if scene := user_input.get(CONF_SCENE_CONTEXT):
+        data[CONF_SCENE_CONTEXT] = scene
+    return data
 
 
 def _clean_target(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -306,10 +308,13 @@ def _clean_target(user_input: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-class AICameraCentreConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle the initial setup."""
+# -- flows ---------------------------------------------------------------
 
-    VERSION = 1
+
+class AICameraCentreConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle the initial setup and expose the camera/target subentries."""
+
+    VERSION = CONFIG_ENTRY_VERSION
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -317,11 +322,10 @@ class AICameraCentreConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
         if user_input is not None:
-            options = _clean_settings(user_input)
-            options[CONF_CAMERAS] = {}
-            options[CONF_ALERT_TARGETS] = {}
             return self.async_create_entry(
-                title="AI Camera Centre", data={}, options=options
+                title="AI Camera Centre",
+                data={},
+                options=_clean_settings(user_input),
             )
         return self.async_show_form(
             step_id="user", data_schema=_settings_schema({})
@@ -332,205 +336,128 @@ class AICameraCentreConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return AICameraCentreOptionsFlow()
 
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        return {
+            SUBENTRY_CAMERA: CameraSubentryFlow,
+            SUBENTRY_TARGET: AlertTargetSubentryFlow,
+        }
+
 
 class AICameraCentreOptionsFlow(OptionsFlow):
-    """Manage cameras, alert targets and settings after setup."""
-
-    def __init__(self) -> None:
-        self._edit_id: str | None = None
-
-    @property
-    def _options(self) -> dict[str, Any]:
-        return copy.deepcopy(dict(self.config_entry.options))
-
-    @property
-    def _cameras(self) -> dict[str, Any]:
-        return dict(self.config_entry.options.get(CONF_CAMERAS, {}))
-
-    @property
-    def _targets(self) -> dict[str, Any]:
-        return dict(self.config_entry.options.get(CONF_ALERT_TARGETS, {}))
-
-    def _camera_choices(self) -> SelectSelector:
-        return SelectSelector(
-            SelectSelectorConfig(
-                options=[
-                    {
-                        "value": camera_id,
-                        "label": conf.get(CONF_CAMERA_NAME) or camera_id,
-                    }
-                    for camera_id, conf in self._cameras.items()
-                ],
-                mode=SelectSelectorMode.LIST,
-            )
-        )
-
-    def _target_choices(self) -> SelectSelector:
-        return SelectSelector(
-            SelectSelectorConfig(
-                options=[
-                    {
-                        "value": target_id,
-                        "label": conf.get(CONF_TARGET_SERVICE) or target_id,
-                    }
-                    for target_id, conf in self._targets.items()
-                ],
-                mode=SelectSelectorMode.LIST,
-            )
-        )
+    """Global settings only — cameras and targets are subentries now."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        menu = ["add_camera"]
-        if self._cameras:
-            menu += ["edit_camera", "remove_camera"]
-        menu.append("add_target")
-        if self._targets:
-            menu += ["edit_target", "remove_target"]
-        menu.append("settings")
-        return self.async_show_menu(step_id="init", menu_options=menu)
-
-    # -- cameras ---------------------------------------------------------
-
-    async def async_step_add_camera(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
         if user_input is not None:
-            camera_id = slugify(user_input[CONF_CAMERA_NAME])
-            if not camera_id:
-                errors[CONF_CAMERA_NAME] = "invalid_name"
-            elif camera_id in self._cameras:
-                errors[CONF_CAMERA_NAME] = "duplicate_camera"
-            else:
-                options = self._options
-                options.setdefault(CONF_CAMERAS, {})[camera_id] = dict(user_input)
-                return self.async_create_entry(data=options)
-        return self.async_show_form(
-            step_id="add_camera", data_schema=_camera_schema(), errors=errors
-        )
-
-    async def async_step_edit_camera(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            self._edit_id = user_input["camera"]
-            return await self.async_step_edit_camera_details()
-        return self.async_show_form(
-            step_id="edit_camera",
-            data_schema=vol.Schema(
-                {vol.Required("camera"): self._camera_choices()}
-            ),
-        )
-
-    async def async_step_edit_camera_details(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        assert self._edit_id is not None
-        if user_input is not None:
-            options = self._options
-            # Keep the original id (and its alert history) even if renamed;
-            # dict(user_input) drops the legacy motion_entity key on save.
-            options[CONF_CAMERAS][self._edit_id] = dict(user_input)
-            return self.async_create_entry(data=options)
-        return self.async_show_form(
-            step_id="edit_camera_details",
-            data_schema=_camera_schema(self._cameras.get(self._edit_id)),
-        )
-
-    async def async_step_remove_camera(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            options = self._options
-            options.get(CONF_CAMERAS, {}).pop(user_input["camera"], None)
-            return self.async_create_entry(data=options)
-        return self.async_show_form(
-            step_id="remove_camera",
-            data_schema=vol.Schema(
-                {vol.Required("camera"): self._camera_choices()}
-            ),
-        )
-
-    # -- alert targets -----------------------------------------------------
-
-    async def async_step_add_target(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            target = _clean_target(user_input)
-            target_id = slugify(target[CONF_TARGET_SERVICE])
-            if not target_id:
-                errors[CONF_TARGET_SERVICE] = "invalid_service"
-            elif target_id in self._targets:
-                errors[CONF_TARGET_SERVICE] = "duplicate_target"
-            else:
-                options = self._options
-                options.setdefault(CONF_ALERT_TARGETS, {})[target_id] = target
-                return self.async_create_entry(data=options)
-        return self.async_show_form(
-            step_id="add_target",
-            data_schema=_target_schema(self.hass, self._cameras),
-            errors=errors,
-        )
-
-    async def async_step_edit_target(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            self._edit_id = user_input["target"]
-            return await self.async_step_edit_target_details()
-        return self.async_show_form(
-            step_id="edit_target",
-            data_schema=vol.Schema(
-                {vol.Required("target"): self._target_choices()}
-            ),
-        )
-
-    async def async_step_edit_target_details(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        assert self._edit_id is not None
-        if user_input is not None:
-            options = self._options
-            options[CONF_ALERT_TARGETS][self._edit_id] = _clean_target(user_input)
-            return self.async_create_entry(data=options)
-        return self.async_show_form(
-            step_id="edit_target_details",
-            data_schema=_target_schema(
-                self.hass, self._cameras, self._targets.get(self._edit_id)
-            ),
-        )
-
-    async def async_step_remove_target(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            options = self._options
-            options.get(CONF_ALERT_TARGETS, {}).pop(user_input["target"], None)
-            return self.async_create_entry(data=options)
-        return self.async_show_form(
-            step_id="remove_target",
-            data_schema=vol.Schema(
-                {vol.Required("target"): self._target_choices()}
-            ),
-        )
-
-    # -- settings ----------------------------------------------------------
-
-    async def async_step_settings(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            options = self._options
+            options = dict(self.config_entry.options)
             options.update(_clean_settings(user_input))
             for key in OPTIONAL_SETTINGS:
                 if key not in user_input:
                     options.pop(key, None)
             return self.async_create_entry(data=options)
         return self.async_show_form(
-            step_id="settings",
+            step_id="init",
             data_schema=_settings_schema(dict(self.config_entry.options)),
+        )
+
+
+class CameraSubentryFlow(ConfigSubentryFlow):
+    """Add or edit a camera."""
+
+    def _camera_ids(self) -> set[str]:
+        return {
+            sub.data.get(CONF_CAMERA_ID)
+            for sub in self._get_entry().subentries.values()
+            if sub.subentry_type == SUBENTRY_CAMERA
+        }
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            camera_id = slugify(user_input[CONF_CAMERA_NAME])
+            if not camera_id:
+                errors[CONF_CAMERA_NAME] = "invalid_name"
+            elif camera_id in self._camera_ids():
+                errors[CONF_CAMERA_NAME] = "duplicate_camera"
+            else:
+                return self.async_create_entry(
+                    title=user_input[CONF_CAMERA_NAME],
+                    data=_clean_camera(user_input, camera_id),
+                    unique_id=camera_id,
+                )
+        return self.async_show_form(
+            step_id="user", data_schema=_camera_schema(), errors=errors
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        subentry = self._get_reconfigure_subentry()
+        if user_input is not None:
+            # Keep the original camera_id (and its alert history) on rename.
+            camera_id = subentry.data.get(CONF_CAMERA_ID) or subentry.subentry_id
+            return self.async_update_and_abort(
+                self._get_entry(),
+                subentry,
+                title=user_input[CONF_CAMERA_NAME],
+                data=_clean_camera(user_input, camera_id),
+            )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_camera_schema(dict(subentry.data)),
+        )
+
+
+class AlertTargetSubentryFlow(ConfigSubentryFlow):
+    """Add or edit an alert target."""
+
+    def _cameras(self) -> dict[str, Any]:
+        return {
+            sub.data.get(CONF_CAMERA_ID): sub.data
+            for sub in self._get_entry().subentries.values()
+            if sub.subentry_type == SUBENTRY_CAMERA
+        }
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            target = _clean_target(user_input)
+            if not target[CONF_TARGET_SERVICE]:
+                errors[CONF_TARGET_SERVICE] = "invalid_service"
+            else:
+                return self.async_create_entry(
+                    title=target[CONF_TARGET_SERVICE], data=target
+                )
+        return self.async_show_form(
+            step_id="user",
+            data_schema=_target_schema(self.hass, self._cameras()),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        subentry = self._get_reconfigure_subentry()
+        if user_input is not None:
+            target = _clean_target(user_input)
+            return self.async_update_and_abort(
+                self._get_entry(),
+                subentry,
+                title=target[CONF_TARGET_SERVICE],
+                data=target,
+            )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_target_schema(
+                self.hass, self._cameras(), dict(subentry.data)
+            ),
         )

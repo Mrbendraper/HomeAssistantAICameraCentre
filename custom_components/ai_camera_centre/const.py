@@ -1,7 +1,17 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.2.0"
+VERSION = "2.3.0"
+
+# config-entry schema version (bumped when the options/subentry layout changes)
+CONFIG_ENTRY_VERSION = 2
+
+# subentry types
+SUBENTRY_CAMERA = "camera"
+SUBENTRY_TARGET = "alert_target"
+
+# how recent an alert must be for the per-camera binary sensor to read "on"
+RECENT_ALERT_MINUTES = 5
 
 # -- global options ------------------------------------------------------
 CONF_RETENTION_DAYS = "retention_days"
@@ -50,7 +60,8 @@ NOTIFY_AWAY_OR_ARMED = "away_or_armed"
 DEFAULT_TARGET_CONDITION = NOTIFY_ALWAYS
 
 # -- per-camera options --------------------------------------------------
-CONF_CAMERAS = "cameras"
+CONF_CAMERAS = "cameras"  # legacy pre-2.3 options dict (migrated to subentries)
+CONF_CAMERA_ID = "camera_id"  # stable slug; storage/record identity
 CONF_CAMERA_NAME = "name"
 CONF_CAMERA_ENTITY = "camera_entity"
 CONF_MOTION_ENTITIES = "motion_entities"
@@ -58,7 +69,7 @@ CONF_MOTION_ENTITY = "motion_entity"  # legacy single-entity key (pre-2.1)
 CONF_SCENE_CONTEXT = "scene_context"
 
 # -- alert target options --------------------------------------------------
-CONF_ALERT_TARGETS = "alert_targets"
+CONF_ALERT_TARGETS = "alert_targets"  # legacy pre-2.3 options dict (migrated)
 CONF_TARGET_SERVICE = "service"
 CONF_TARGET_MIN_SCORE = "min_score"
 CONF_TARGET_CAMERAS = "cameras"  # camera ids; empty list = all cameras

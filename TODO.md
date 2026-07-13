@@ -21,38 +21,28 @@
   threat outside the logging window is never silently dropped. A forced
   `analyze` service call always archives. Global, not per-camera.
 
-## Planned
-
-## 4. UI overhaul — each camera as its own device
-
-Everything currently lives on one integration card with a single "1 service"
-entry and all configuration buried in the options-flow menu. Restructure so
-the integration page reads like a proper multi-device hub:
-
-- **Config subentries** (HA 2025.3+, `ConfigSubentryFlow`): make each camera
-  a subentry of the main config entry. The integration page then gets a
-  native **"Add camera"** button, and every camera is listed with its own
-  rename / configure / delete controls — no more add/edit/remove menu inside
-  the options flow. Alert targets could be a second subentry type
-  (`async_get_supported_subentry_types` returns both).
-- **Device registry**: register one device per camera subentry
-  (`device_registry.async_get_or_create` with the subentry id), so each
-  camera gets a device page. Attach all of that camera's entities to it.
-- **More per-camera entities** hanging off each device:
-  - `image` entity showing the latest alert snapshot
-  - `sensor` for last alert score (plus existing 24h-count sensor)
-  - `binary_sensor` "alert in the last N minutes"
-  - `switch` to pause/resume analysis for that camera (holiday mode,
-    gardener day, etc.)
-  - `button` to run `analyze` for that camera from the device page
-- Migration: on upgrade, convert the `cameras` dict in options into
-  subentries (config entry `async_migrate_entry` bumping the entry VERSION)
-  so existing setups carry over without reconfiguring.
-- The options flow shrinks to just the global settings.
-- Touches: `config_flow.py` (subentry flows), `__init__.py` (setup loops
-  over subentries instead of options; migration), `sensor.py` (+ new
-  platform files `image.py`, `binary_sensor.py`, `switch.py`, `button.py`),
-  `strings.json`/`translations`.
+- **4. UI overhaul — each camera as its own device** (v2.3.0). Cameras and
+  alert targets are now config *subentries* (`ConfigSubentryFlow`), so the
+  integration page has native Add camera / Add alert target buttons and
+  per-item edit/delete; the options flow is global settings only. Each
+  camera registers a device with six entities (`sensor` alerts-24h +
+  last-score, `binary_sensor` recent-alert, `image` latest-alert, `switch`
+  analysis on/off, `button` analyze-now). `async_migrate_entry` converts the
+  old `cameras`/`alert_targets` options dicts (and even-older
+  `notify_services`) into subentries, keeping `camera_id` slugs stable so
+  storage/history carries over. New files: `entity.py`, `image.py`,
+  `binary_sensor.py`, `switch.py`, `button.py`.
+  ⚠️ **Needs live-HA verification** (drafted without a running HA):
+  - `async_update_entry(entry, version=...)` and `async_add_subentry` in
+    `async_migrate_entry` — confirm the migration path runs cleanly on a
+    real v1 entry.
+  - `ConfigSubentryFlow._get_entry()` / `_get_reconfigure_subentry()` and
+    `async_update_and_abort` signatures on the installed HA version.
+  - That adding/removing a camera subentry via the UI reloads the entry so
+    its pipeline + entities appear/disappear (relies on the update listener
+    firing on subentry changes).
+  - The 24h sensor keeps its pre-2.3 `unique_id` to preserve statistics;
+    confirm the entity re-homes onto the new device without duplicating.
 
 ## Backlog — further ideas (unscoped)
 

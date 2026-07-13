@@ -13,15 +13,19 @@ card.
 
 ## Features
 
+- **A device per camera** — each camera you add appears as its own device
+  in Home Assistant with its own entities (see below), added straight from
+  the integration page with a native **Add camera** button.
 - **Built-in analysis pipeline** — configure cameras entirely in the UI:
   camera entity, one or more motion triggers, and an optional per-camera
   scene description that is injected into the AI prompt (e.g. "a gate is
   visible; subjects behind the gate are likely arriving").
-- **Alert targets** — add notify services the same way you add cameras.
-  Each target has its own minimum suspicion score, an optional camera
-  filter, and a **notify condition** (always / only when nobody's home /
-  only when the alarm is armed / away-or-armed), so one phone can get every
-  event while another is only woken for high-risk alerts when you're out.
+- **Alert targets** — add notify services the same way you add cameras
+  (their own **Add alert target** button). Each target has its own minimum
+  suspicion score, an optional camera filter, and a **notify condition**
+  (always / only when nobody's home / only when the alarm is armed /
+  away-or-armed), so one phone can get every event while another is only
+  woken for high-risk alerts when you're out.
 - **Alarmo integration** — optionally trip
   [Alarmo](https://github.com/nielsfaber/alarmo) when a high-risk alert
   lands while the alarm is already armed, so the AI can sound the siren,
@@ -41,8 +45,11 @@ card.
   the integration and auto-registered as a dashboard resource.
 - **Automatic retention** — alerts and images older than N days (default 7)
   are pruned automatically.
-- **Per-camera sensors** — `sensor.<camera>_alerts_24h` with last-alert
-  details as attributes, for use in your own automations.
+- **Per-camera entities** — every camera device carries: an *Alerts (24h)*
+  count sensor, a *Last score* sensor, a *Recent alert* binary sensor, a
+  *Latest alert* image, an *Analysis* switch to pause/resume that camera,
+  and an *Analyze now* button. Use them on dashboards and in your own
+  automations.
 - **Services** — `ai_camera_centre.analyze` triggers the pipeline on demand;
   `ai_camera_centre.log_alert` lets advanced users log alerts from their own
   scripts into the same history.
@@ -74,16 +81,19 @@ Copy `custom_components/ai_camera_centre/` into your
 
 1. Settings → Devices & Services → Add Integration → **AI Camera Centre**
    and fill in the global settings.
-2. Open the integration's **Configure** button → **Add a camera**:
+2. On the integration page, click **Add camera** (a native "+" button, not
+   the Configure menu):
    - **Camera name** — e.g. "Side Gate"
    - **Camera stream entity** — the `camera.*` entity to snapshot
    - **Motion triggers** — one or more entities (`binary_sensor`,
      `input_boolean` or `switch`); any of them turning on starts the
      analysis (optional; leave blank to trigger only via the `analyze`
-     service)
+     service or the camera's *Analyze now* button)
    - **Scene context** — optional but recommended: describe what the camera
      sees and state explicitly whether a gate is visible
-3. Configure → **Add an alert target**:
+
+   Each camera you add becomes its own **device** with its entities.
+3. On the same page, click **Add alert target**:
    - **Notify service** — pick from the dropdown
      (e.g. `notify.mobile_app_your_phone`)
    - **Minimum suspicion score** — 1 sends every alert; 6+ only wakes this
@@ -91,14 +101,14 @@ Copy `custom_components/ai_camera_centre/` into your
    - **When to notify** — always, or only when nobody's home / the alarm is
      armed / either (the armed options need an alarm panel set in Settings)
    - **Cameras** — optionally restrict this target to specific cameras
-4. Optional, in Configure → **Settings**:
+4. Optional, in the integration's **Configure** button (global **Settings**):
    - **Alarm panel** — pick your `alarm_control_panel.*` to enable the armed
      notify conditions and Alarmo triggering
    - **Minimum score to log** / **log time window** — keep low-risk or
      daytime noise out of the history
    - **Trigger Alarmo** — sound Alarmo on high-risk alerts while armed
 5. Repeat for each camera and target. That's it — walk in front of a camera
-   to test, or call the service manually:
+   to test, use its *Analyze now* button, or call the service manually:
 
 ```yaml
 action: ai_camera_centre.analyze
@@ -118,11 +128,18 @@ If auto-registration of the resource fails (e.g. YAML-mode dashboards), add
 it manually: Settings → Dashboards → Resources → Add →
 URL `/ai_camera_centre/ai-camera-centre-card.js`, type **JavaScript module**.
 
-### Sensors
+### Entities per camera
 
-`sensor.<camera_label>_alerts_24h` — state is the alert count in the last
-24 hours; attributes include `last_alert`, `last_score`, `last_short`,
-`last_image`, and `max_score_24h`.
+Each camera device exposes:
+
+| Entity | What it does |
+| --- | --- |
+| `sensor.<camera>_alerts_24h` | Alert count in the last 24 h; attributes `last_alert`, `last_score`, `last_short`, `last_image`, `max_score_24h` |
+| `sensor.<camera>_last_score` | Suspicion score (1–10) of the most recent alert |
+| `binary_sensor.<camera>_recent_alert` | On for a few minutes after each alert |
+| `image.<camera>_latest_alert` | The latest alert snapshot (drop onto a dashboard) |
+| `switch.<camera>_analysis` | Turn a camera's automatic analysis off/on (holiday mode, gardener day). The *Analyze now* button and service still work while off |
+| `button.<camera>_analyze` | Run an analysis on demand |
 
 ## How the pipeline works
 
@@ -204,6 +221,16 @@ automatically on Home Assistant **2026.3 or newer**; older versions show
 the default placeholder. If you're on 2026.3+ and still see the
 placeholder, hard-refresh the browser / reset the companion app's
 frontend cache. Details in [docs/BRANDING.md](docs/BRANDING.md).
+
+## Upgrading
+
+Upgrades are automatic — just update via HACS and restart. In **2.3** the
+config layout changed so each camera and alert target is now a config
+*subentry* (its own device / native add button); your existing cameras and
+targets, and all stored alert history, are migrated on first start with no
+action needed. Dashboards using `custom:alert-history-card` (the pre-2.0
+card name) keep working via an alias, but new dashboards should use
+`custom:ai-camera-centre-card`.
 
 ## Releasing (maintainers)
 

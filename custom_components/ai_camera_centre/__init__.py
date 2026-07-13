@@ -20,7 +20,8 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.const import Platform
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -34,11 +35,14 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.util import slugify
 
 from .analyzer import CameraPipeline
 from .const import (
     CARD_URL,
     CONF_ALERT_TARGETS,
+    CONF_CAMERA_ID,
+    CONF_CAMERA_NAME,
     CONF_CAMERAS,
     CONF_MIN_NOTIFY_SCORE,
     CONF_MOTION_ENTITIES,
@@ -48,6 +52,7 @@ from .const import (
     CONF_TARGET_CAMERAS,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_SERVICE,
+    CONFIG_ENTRY_VERSION,
     DEFAULT_MIN_NOTIFY_SCORE,
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
@@ -57,12 +62,20 @@ from .const import (
     SIGNAL_NEW_ALERT,
     SNAPSHOTS_URL,
     STORAGE_DIR,
+    SUBENTRY_CAMERA,
+    SUBENTRY_TARGET,
     VERSION,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.IMAGE,
+    Platform.SWITCH,
+    Platform.BUTTON,
+]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 SERVICE_LOG_ALERT = "log_alert"
@@ -207,6 +220,31 @@ class AlertStore:
             cams.setdefault(rec["camera"], rec.get("camera_label") or rec["camera"])
         return cams
 
+    # -- per-camera queries (used by the entity platforms) --------------
+
+    def camera_alerts(self, camera_id: str) -> list[dict[str, Any]]:
+        """All in-retention alerts for one camera, newest first."""
+        return [r for r in self.alerts() if r.get("camera") == camera_id]
+
+    def latest_for(self, camera_id: str) -> dict[str, Any] | None:
+        alerts = self.camera_alerts(camera_id)
+        return alerts[0] if alerts else None
+
+    def count_since(self, camera_id: str, cutoff: float) -> int:
+        return sum(
+            1
+            for r in self.camera_alerts(camera_id)
+            if float(r.get("ts", 0)) >= cutoff
+        )
+
+    def image_path_for(self, record: dict[str, Any]) -> str | None:
+        """Map an alert record's image URL back to its file on disk."""
+        image = record.get("image", "")
+        if not image:
+            return None
+        fname = os.path.basename(image)
+        return os.path.join(self.images_dir, record.get("camera", ""), fname)
+
 
 def _migrate_legacy_dir_sync(old_dir: str, new_dir: str) -> bool:
     """Move the pre-rename alert_history data directory if present."""
@@ -254,6 +292,66 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         )
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate v1 (cameras/targets in options) to v2 (config subentries)."""
+    if entry.version > CONFIG_ENTRY_VERSION:
+        # Downgrade from a newer schema is not supported.
+        return False
+
+    if entry.version == 1:
+        options = dict(entry.options)
+        cameras = options.pop(CONF_CAMERAS, {}) or {}
+        targets = options.pop(CONF_ALERT_TARGETS, {}) or {}
+
+        # Even older configs stored a comma-separated notify_services string.
+        if not targets and (legacy := options.pop(CONF_NOTIFY_SERVICES, None)):
+            legacy_min = int(
+                options.pop(CONF_MIN_NOTIFY_SCORE, DEFAULT_MIN_NOTIFY_SCORE)
+            )
+            targets = {
+                slugify(service.strip()): {
+                    CONF_TARGET_SERVICE: service.strip(),
+                    CONF_TARGET_MIN_SCORE: legacy_min,
+                    CONF_TARGET_CAMERAS: [],
+                }
+                for service in str(legacy).split(",")
+                if service.strip()
+            }
+
+        new_subentries: list[ConfigSubentry] = []
+        for camera_id, conf in cameras.items():
+            new_subentries.append(
+                ConfigSubentry(
+                    data={**conf, CONF_CAMERA_ID: camera_id},
+                    subentry_type=SUBENTRY_CAMERA,
+                    title=conf.get(CONF_CAMERA_NAME) or camera_id,
+                    unique_id=camera_id,
+                )
+            )
+        for target_id, conf in targets.items():
+            new_subentries.append(
+                ConfigSubentry(
+                    data=dict(conf),
+                    subentry_type=SUBENTRY_TARGET,
+                    title=conf.get(CONF_TARGET_SERVICE) or target_id,
+                    unique_id=target_id,
+                )
+            )
+
+        hass.config_entries.async_update_entry(
+            entry, options=options, version=CONFIG_ENTRY_VERSION
+        )
+        for subentry in new_subentries:
+            hass.config_entries.async_add_subentry(entry, subentry)
+        _LOGGER.info(
+            "Migrated %d camera(s) and %d alert target(s) to subentries",
+            len(cameras),
+            len(targets),
+        )
+
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AI Camera Centre from a config entry."""
     retention = entry.options.get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS)
@@ -286,27 +384,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         websocket_api.async_register_command(hass, ws_list_alerts)
         hass.data[DOMAIN]["http_registered"] = True
 
-    # -- built-in analysis pipelines -----------------------------------
-    targets = [dict(t) for t in entry.options.get(CONF_ALERT_TARGETS, {}).values()]
-    if not targets and (legacy_notify := entry.options.get(CONF_NOTIFY_SERVICES)):
-        # Migrate the pre-2.1 comma-separated notify_services setting.
-        legacy_min = int(
-            entry.options.get(CONF_MIN_NOTIFY_SCORE, DEFAULT_MIN_NOTIFY_SCORE)
-        )
-        targets = [
-            {
-                CONF_TARGET_SERVICE: service.strip(),
-                CONF_TARGET_MIN_SCORE: legacy_min,
-                CONF_TARGET_CAMERAS: [],
-            }
-            for service in str(legacy_notify).split(",")
-            if service.strip()
-        ]
+    # -- built-in analysis pipelines (one per camera subentry) ---------
+    targets = [
+        dict(sub.data)
+        for sub in entry.subentries.values()
+        if sub.subentry_type == SUBENTRY_TARGET
+    ]
 
     pipelines: dict[str, CameraPipeline] = {}
-    for camera_id, camera_conf in entry.options.get(CONF_CAMERAS, {}).items():
+    for sub in entry.subentries.values():
+        if sub.subentry_type != SUBENTRY_CAMERA:
+            continue
+        camera_conf = dict(sub.data)
+        camera_id = camera_conf.get(CONF_CAMERA_ID) or sub.subentry_id
         pipeline = CameraPipeline(
-            hass, store, dict(entry.options), camera_id, dict(camera_conf), targets
+            hass, store, dict(entry.options), camera_id, camera_conf, targets
         )
         pipelines[camera_id] = pipeline
         motion_entities = camera_conf.get(CONF_MOTION_ENTITIES) or []

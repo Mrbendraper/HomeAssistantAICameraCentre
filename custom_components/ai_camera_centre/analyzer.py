@@ -194,6 +194,8 @@ class CameraPipeline:
         )
         self.log_window_start = global_options.get(CONF_LOG_WINDOW_START)
         self.log_window_end = global_options.get(CONF_LOG_WINDOW_END)
+        # runtime state (survives pipeline rebuilds via the switch entity)
+        self.paused = False
         self._lock = asyncio.Lock()
         self._last_run = 0.0
 
@@ -211,7 +213,10 @@ class CameraPipeline:
         self.hass.async_create_task(self.async_analyze())
 
     async def async_analyze(self, force: bool = False) -> None:
-        """Run the pipeline, respecting the per-camera cooldown."""
+        """Run the pipeline, respecting pause state and the per-camera cooldown."""
+        if self.paused and not force:
+            _LOGGER.debug("%s: analysis paused, skipping", self.camera_id)
+            return
         if self._lock.locked():
             _LOGGER.debug("%s: analysis already running, skipping", self.camera_id)
             return

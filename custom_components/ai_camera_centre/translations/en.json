@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "AI Camera Centre",
-        "description": "Global settings — you can change these later, and add cameras and alert targets from the integration's Configure button.",
+        "description": "Global settings — you can change these later, and add cameras and alert targets from the integration page once setup finishes.",
         "data": {
           "retention_days": "Alert retention (days)",
           "snapshot_count": "Snapshots per analysis",
@@ -27,84 +27,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "AI Camera Centre",
-        "menu_options": {
-          "add_camera": "Add a camera",
-          "edit_camera": "Edit a camera",
-          "remove_camera": "Remove a camera",
-          "add_target": "Add an alert target",
-          "edit_target": "Edit an alert target",
-          "remove_target": "Remove an alert target",
-          "settings": "Settings"
-        }
-      },
-      "add_camera": {
-        "title": "Add camera",
-        "description": "Any of the motion triggers turning on starts the AI analysis. The scene context is added to the AI prompt — describe what the camera sees, and say explicitly whether a gate is visible.",
-        "data": {
-          "name": "Camera name",
-          "camera_entity": "Camera stream entity",
-          "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service)",
-          "scene_context": "Scene context for the AI (optional)"
-        }
-      },
-      "edit_camera": {
-        "title": "Edit camera",
-        "data": {
-          "camera": "Camera"
-        }
-      },
-      "edit_camera_details": {
-        "title": "Edit camera",
-        "description": "Any of the motion triggers turning on starts the AI analysis. The scene context is added to the AI prompt — describe what the camera sees, and say explicitly whether a gate is visible.",
-        "data": {
-          "name": "Camera name",
-          "camera_entity": "Camera stream entity",
-          "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service)",
-          "scene_context": "Scene context for the AI (optional)"
-        }
-      },
-      "remove_camera": {
-        "title": "Remove camera",
-        "data": {
-          "camera": "Camera"
-        }
-      },
-      "add_target": {
-        "title": "Add alert target",
-        "description": "An alert target is a notify service that receives camera alerts. Set the minimum suspicion score it should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
-        "data": {
-          "service": "Notify service",
-          "min_score": "Minimum suspicion score to notify (1 = every alert)",
-          "notify_condition": "When to notify this target",
-          "cameras": "Only alert for these cameras (blank = all)"
-        }
-      },
-      "edit_target": {
-        "title": "Edit alert target",
-        "data": {
-          "target": "Alert target"
-        }
-      },
-      "edit_target_details": {
-        "title": "Edit alert target",
-        "description": "Set the minimum suspicion score this target should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
-        "data": {
-          "service": "Notify service",
-          "min_score": "Minimum suspicion score to notify (1 = every alert)",
-          "notify_condition": "When to notify this target",
-          "cameras": "Only alert for these cameras (blank = all)"
-        }
-      },
-      "remove_target": {
-        "title": "Remove alert target",
-        "data": {
-          "target": "Alert target"
-        }
-      },
-      "settings": {
-        "title": "Settings",
-        "description": "The 'armed' notify conditions and Alarmo triggering both need an alarm panel selected. Time-window logging only records alerts within the chosen hours (leave blank to log at any time).",
+        "title": "AI Camera Centre settings",
+        "description": "The 'armed' notify conditions and Alarmo triggering both need an alarm panel selected. Time-window logging only records alerts within the chosen hours (leave blank to log at any time). Add or edit cameras and alert targets from the integration page.",
         "data": {
           "retention_days": "Alert retention (days)",
           "snapshot_count": "Snapshots per analysis",
@@ -120,12 +44,73 @@
           "alarmo_trigger_score": "Score at or above which Alarmo is triggered"
         }
       }
+    }
+  },
+  "config_subentries": {
+    "camera": {
+      "initiate_flow": {
+        "user": "Add camera",
+        "reconfigure": "Edit camera"
+      },
+      "entry_type": "Camera",
+      "step": {
+        "user": {
+          "title": "Add camera",
+          "description": "Any of the motion triggers turning on starts the AI analysis. The scene context is added to the AI prompt — describe what the camera sees, and say explicitly whether a gate is visible.",
+          "data": {
+            "name": "Camera name",
+            "camera_entity": "Camera stream entity",
+            "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service or the Analyze button)",
+            "scene_context": "Scene context for the AI (optional)"
+          }
+        },
+        "reconfigure": {
+          "title": "Edit camera",
+          "description": "Renaming keeps the camera's existing alert history. Any of the motion triggers turning on starts the AI analysis.",
+          "data": {
+            "name": "Camera name",
+            "camera_entity": "Camera stream entity",
+            "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service or the Analyze button)",
+            "scene_context": "Scene context for the AI (optional)"
+          }
+        }
+      },
+      "error": {
+        "invalid_name": "Please enter a valid camera name.",
+        "duplicate_camera": "A camera with this name already exists."
+      }
     },
-    "error": {
-      "invalid_name": "Please enter a valid camera name.",
-      "duplicate_camera": "A camera with this name already exists.",
-      "invalid_service": "Please select or enter a notify service.",
-      "duplicate_target": "This notify service is already an alert target — edit it instead."
+    "alert_target": {
+      "initiate_flow": {
+        "user": "Add alert target",
+        "reconfigure": "Edit alert target"
+      },
+      "entry_type": "Alert target",
+      "step": {
+        "user": {
+          "title": "Add alert target",
+          "description": "An alert target is a notify service that receives camera alerts. Set the minimum suspicion score it should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
+          "data": {
+            "service": "Notify service",
+            "min_score": "Minimum suspicion score to notify (1 = every alert)",
+            "notify_condition": "When to notify this target",
+            "cameras": "Only alert for these cameras (blank = all)"
+          }
+        },
+        "reconfigure": {
+          "title": "Edit alert target",
+          "description": "Set the minimum suspicion score this target should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
+          "data": {
+            "service": "Notify service",
+            "min_score": "Minimum suspicion score to notify (1 = every alert)",
+            "notify_condition": "When to notify this target",
+            "cameras": "Only alert for these cameras (blank = all)"
+          }
+        }
+      },
+      "error": {
+        "invalid_service": "Please select or enter a notify service."
+      }
     }
   }
 }
