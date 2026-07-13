@@ -50,7 +50,6 @@ from .const import (
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
     CONF_MOTION_ENTITIES,
-    CONF_MOTION_ENTITY,
     CONF_RETENTION_DAYS,
     CONF_SCENE_CONTEXT,
     CONF_SNAPSHOT_COUNT,
@@ -59,7 +58,6 @@ from .const import (
     CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_SERVICE,
-    CONFIG_ENTRY_VERSION,
     DEFAULT_ALARMO_TRIGGER_SCORE,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
@@ -185,9 +183,6 @@ def _camera_schema(camera: dict[str, Any] | None = None) -> vol.Schema:
     """Add/edit camera form, prefilled when editing."""
     camera = camera or {}
     motion_entities = camera.get(CONF_MOTION_ENTITIES) or []
-    if legacy_motion := camera.get(CONF_MOTION_ENTITY):
-        if legacy_motion not in motion_entities:
-            motion_entities = [*motion_entities, legacy_motion]
     return vol.Schema(
         {
             vol.Required(
@@ -314,7 +309,7 @@ def _clean_target(user_input: dict[str, Any]) -> dict[str, Any]:
 class AICameraCentreConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the initial setup and expose the camera/target subentries."""
 
-    VERSION = CONFIG_ENTRY_VERSION
+    VERSION = 1
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

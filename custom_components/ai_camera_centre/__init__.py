@@ -20,7 +20,7 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import (
     HomeAssistant,
@@ -35,30 +35,16 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
-from homeassistant.util import slugify
 
 from .analyzer import CameraPipeline
 from .const import (
     CARD_URL,
-    CONF_ALERT_TARGETS,
     CONF_CAMERA_ID,
-    CONF_CAMERA_NAME,
-    CONF_CAMERAS,
-    CONF_MIN_NOTIFY_SCORE,
     CONF_MOTION_ENTITIES,
-    CONF_MOTION_ENTITY,
-    CONF_NOTIFY_SERVICES,
     CONF_RETENTION_DAYS,
-    CONF_TARGET_CAMERAS,
-    CONF_TARGET_MIN_SCORE,
-    CONF_TARGET_SERVICE,
-    CONFIG_ENTRY_VERSION,
-    DEFAULT_MIN_NOTIFY_SCORE,
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
     IMAGES_URL,
-    LEGACY_IMAGES_URL,
-    LEGACY_STORAGE_DIR,
     SIGNAL_NEW_ALERT,
     SNAPSHOTS_URL,
     STORAGE_DIR,
@@ -130,13 +116,9 @@ class AlertStore:
                     if not line:
                         continue
                     try:
-                        record = json.loads(line)
+                        records.append(json.loads(line))
                     except json.JSONDecodeError:
                         continue
-                    image = record.get("image", "")
-                    if image.startswith(LEGACY_IMAGES_URL):
-                        record["image"] = IMAGES_URL + image[len(LEGACY_IMAGES_URL):]
-                    records.append(record)
         return records
 
     def _append_sync(self, record: dict[str, Any], src: str, dest: str) -> None:
@@ -246,14 +228,6 @@ class AlertStore:
         return os.path.join(self.images_dir, record.get("camera", ""), fname)
 
 
-def _migrate_legacy_dir_sync(old_dir: str, new_dir: str) -> bool:
-    """Move the pre-rename alert_history data directory if present."""
-    if os.path.isdir(old_dir) and not os.path.isdir(new_dir):
-        shutil.move(old_dir, new_dir)
-        return True
-    return False
-
-
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/alerts"})
 @websocket_api.async_response
 async def ws_list_alerts(
@@ -292,76 +266,10 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         )
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate v1 (cameras/targets in options) to v2 (config subentries)."""
-    if entry.version > CONFIG_ENTRY_VERSION:
-        # Downgrade from a newer schema is not supported.
-        return False
-
-    if entry.version == 1:
-        options = dict(entry.options)
-        cameras = options.pop(CONF_CAMERAS, {}) or {}
-        targets = options.pop(CONF_ALERT_TARGETS, {}) or {}
-
-        # Even older configs stored a comma-separated notify_services string.
-        if not targets and (legacy := options.pop(CONF_NOTIFY_SERVICES, None)):
-            legacy_min = int(
-                options.pop(CONF_MIN_NOTIFY_SCORE, DEFAULT_MIN_NOTIFY_SCORE)
-            )
-            targets = {
-                slugify(service.strip()): {
-                    CONF_TARGET_SERVICE: service.strip(),
-                    CONF_TARGET_MIN_SCORE: legacy_min,
-                    CONF_TARGET_CAMERAS: [],
-                }
-                for service in str(legacy).split(",")
-                if service.strip()
-            }
-
-        new_subentries: list[ConfigSubentry] = []
-        for camera_id, conf in cameras.items():
-            new_subentries.append(
-                ConfigSubentry(
-                    data={**conf, CONF_CAMERA_ID: camera_id},
-                    subentry_type=SUBENTRY_CAMERA,
-                    title=conf.get(CONF_CAMERA_NAME) or camera_id,
-                    unique_id=camera_id,
-                )
-            )
-        for target_id, conf in targets.items():
-            new_subentries.append(
-                ConfigSubentry(
-                    data=dict(conf),
-                    subentry_type=SUBENTRY_TARGET,
-                    title=conf.get(CONF_TARGET_SERVICE) or target_id,
-                    unique_id=target_id,
-                )
-            )
-
-        hass.config_entries.async_update_entry(
-            entry, options=options, version=CONFIG_ENTRY_VERSION
-        )
-        for subentry in new_subentries:
-            hass.config_entries.async_add_subentry(entry, subentry)
-        _LOGGER.info(
-            "Migrated %d camera(s) and %d alert target(s) to subentries",
-            len(cameras),
-            len(targets),
-        )
-
-    return True
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AI Camera Centre from a config entry."""
     retention = entry.options.get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS)
     base_dir = hass.config.path(STORAGE_DIR)
-    legacy_dir = hass.config.path(LEGACY_STORAGE_DIR)
-    if await hass.async_add_executor_job(
-        _migrate_legacy_dir_sync, legacy_dir, base_dir
-    ):
-        _LOGGER.info("Migrated alert data from %s to %s", legacy_dir, base_dir)
-
     store = AlertStore(hass, base_dir, retention)
     await store.async_load()
     await store.async_prune()
@@ -402,10 +310,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         pipelines[camera_id] = pipeline
         motion_entities = camera_conf.get(CONF_MOTION_ENTITIES) or []
-        if legacy_motion := camera_conf.get(CONF_MOTION_ENTITY):
-            # Pre-2.1 single-entity key.
-            if legacy_motion not in motion_entities:
-                motion_entities = [*motion_entities, legacy_motion]
         if motion_entities:
             entry.async_on_unload(
                 async_track_state_change_event(

@@ -175,9 +175,7 @@ independent, by design:
 - "Nobody home" is true when no `person.*` entity is in the `home` zone; if
   you have no person entities at all it is treated as away (fail open).
 
-Storage lives in `<config>/ai_camera_centre/` (JSONL log + images). Data
-from the previous *Alert History* version of this integration is migrated
-automatically on first start.
+Storage lives in `<config>/ai_camera_centre/` (a JSONL log plus images).
 
 ## Advanced: bring your own pipeline
 
@@ -224,13 +222,14 @@ frontend cache. Details in [docs/BRANDING.md](docs/BRANDING.md).
 
 ## Upgrading
 
-Upgrades are automatic — just update via HACS and restart. In **2.3** the
-config layout changed so each camera and alert target is now a config
-*subentry* (its own device / native add button); your existing cameras and
-targets, and all stored alert history, are migrated on first start with no
-action needed. Dashboards using `custom:alert-history-card` (the pre-2.0
-card name) keep working via an alias, but new dashboards should use
-`custom:ai-camera-centre-card`.
+Update via HACS and restart. **2.3 is a fresh-config release**: cameras and
+alert targets are now config *subentries* (each its own device / native add
+button), and there is no automatic migration from the earlier development
+layout — if you are coming from a pre-2.3 build, remove and re-add the
+integration, then add your cameras and targets again. Stored alert history
+in `<config>/ai_camera_centre/` is unaffected. Dashboards using
+`custom:alert-history-card` (the pre-2.0 card name) keep working via an
+alias, but new dashboards should use `custom:ai-camera-centre-card`.
 
 ## Releasing (maintainers)
 

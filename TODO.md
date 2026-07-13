@@ -27,22 +27,25 @@
   per-item edit/delete; the options flow is global settings only. Each
   camera registers a device with six entities (`sensor` alerts-24h +
   last-score, `binary_sensor` recent-alert, `image` latest-alert, `switch`
-  analysis on/off, `button` analyze-now). `async_migrate_entry` converts the
-  old `cameras`/`alert_targets` options dicts (and even-older
-  `notify_services`) into subentries, keeping `camera_id` slugs stable so
-  storage/history carries over. New files: `entity.py`, `image.py`,
-  `binary_sensor.py`, `switch.py`, `button.py`.
+  analysis on/off, `button` analyze-now). `camera_id` slugs stay stable so
+  the alert store/history is keyed consistently. New files: `entity.py`,
+  `image.py`, `binary_sensor.py`, `switch.py`, `button.py`. No config
+  migration: 2.3 is a fresh-config release (all back-compat/migration code
+  was removed — see below), so an existing dev install is removed and
+  re-added.
   ⚠️ **Needs live-HA verification** (drafted without a running HA):
-  - `async_update_entry(entry, version=...)` and `async_add_subentry` in
-    `async_migrate_entry` — confirm the migration path runs cleanly on a
-    real v1 entry.
   - `ConfigSubentryFlow._get_entry()` / `_get_reconfigure_subentry()` and
     `async_update_and_abort` signatures on the installed HA version.
   - That adding/removing a camera subentry via the UI reloads the entry so
     its pipeline + entities appear/disappear (relies on the update listener
     firing on subentry changes).
-  - The 24h sensor keeps its pre-2.3 `unique_id` to preserve statistics;
-    confirm the entity re-homes onto the new device without duplicating.
+
+- **Removed all migration / back-compat code** (v2.3.0). Dropped the v1→v2
+  options→subentry migration, the `alert_history`→`ai_camera_centre` storage
+  dir move, the legacy image-URL rewrite, the pre-2.1 single
+  `motion_entity` key, and the `notify_services`/`min_notify_score` legacy
+  options — the project is pre-release so there are no old installs to
+  support.
 
 ## Backlog — further ideas (unscoped)
 
