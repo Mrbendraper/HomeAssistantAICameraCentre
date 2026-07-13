@@ -1,4 +1,4 @@
-<img src="assets/logo-wide.png" alt="AI Camera Centre" width="490">
+<img src="https://raw.githubusercontent.com/simpleaddins/HomeAssistantAICameraCentre/main/assets/logo-wide.png" alt="AI Camera Centre" width="490">
 
 A self-contained Home Assistant custom integration (HACS-compatible) that
 turns your cameras into an AI-powered alerting system — no YAML scripts or
