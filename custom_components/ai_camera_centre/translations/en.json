@@ -91,6 +91,7 @@
           "title": "Add alert target",
           "description": "An alert target is a notify service that receives camera alerts. Set the minimum suspicion score it should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
           "data": {
+            "name": "Name (optional — a friendly label, e.g. \"Ben's phone\")",
             "service": "Notify service",
             "min_score": "Minimum suspicion score to notify (1 = every alert)",
             "notify_condition": "When to notify this target",
@@ -101,6 +102,7 @@
           "title": "Edit alert target",
           "description": "Set the minimum suspicion score this target should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
           "data": {
+            "name": "Name (optional — a friendly label, e.g. \"Ben's phone\")",
             "service": "Notify service",
             "min_score": "Minimum suspicion score to notify (1 = every alert)",
             "notify_condition": "When to notify this target",

@@ -57,6 +57,7 @@ from .const import (
     CONF_TARGET_CAMERAS,
     CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
+    CONF_TARGET_NAME,
     CONF_TARGET_SERVICE,
     DEFAULT_ALARMO_TRIGGER_SCORE,
     DEFAULT_COOLDOWN_SECONDS,
@@ -221,6 +222,18 @@ def _notify_service_selector(hass: HomeAssistant) -> SelectSelector:
     )
 
 
+def _friendly_service_name(service: str) -> str:
+    """Turn notify.mobile_app_ben_s_note15_pro into 'Ben S Note15 Pro'."""
+    name = service.removeprefix("notify.").removeprefix("mobile_app_")
+    return name.replace("_", " ").strip().title() or service
+
+
+def _target_title(target: dict[str, Any]) -> str:
+    return target.get(CONF_TARGET_NAME) or _friendly_service_name(
+        target.get(CONF_TARGET_SERVICE, "")
+    )
+
+
 def _target_schema(
     hass: HomeAssistant,
     cameras: dict[str, Any],
@@ -230,6 +243,10 @@ def _target_schema(
     target = target or {}
     return vol.Schema(
         {
+            vol.Optional(
+                CONF_TARGET_NAME,
+                description={"suggested_value": target.get(CONF_TARGET_NAME)},
+            ): TextSelector(),
             vol.Required(
                 CONF_TARGET_SERVICE,
                 description={"suggested_value": target.get(CONF_TARGET_SERVICE)},
@@ -294,6 +311,7 @@ def _clean_camera(user_input: dict[str, Any], camera_id: str) -> dict[str, Any]:
 
 def _clean_target(user_input: dict[str, Any]) -> dict[str, Any]:
     return {
+        CONF_TARGET_NAME: (user_input.get(CONF_TARGET_NAME) or "").strip(),
         CONF_TARGET_SERVICE: str(user_input[CONF_TARGET_SERVICE]).strip(),
         CONF_TARGET_MIN_SCORE: int(user_input[CONF_TARGET_MIN_SCORE]),
         CONF_TARGET_CONDITION: user_input.get(
@@ -430,7 +448,7 @@ class AlertTargetSubentryFlow(ConfigSubentryFlow):
                 errors[CONF_TARGET_SERVICE] = "invalid_service"
             else:
                 return self.async_create_entry(
-                    title=target[CONF_TARGET_SERVICE], data=target
+                    title=_target_title(target), data=target
                 )
         return self.async_show_form(
             step_id="user",
@@ -447,7 +465,7 @@ class AlertTargetSubentryFlow(ConfigSubentryFlow):
             return self.async_update_and_abort(
                 self._get_entry(),
                 subentry,
-                title=target[CONF_TARGET_SERVICE],
+                title=_target_title(target),
                 data=target,
             )
         return self.async_show_form(

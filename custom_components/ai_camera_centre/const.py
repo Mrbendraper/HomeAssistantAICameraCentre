@@ -60,6 +60,7 @@ CONF_MOTION_ENTITIES = "motion_entities"
 CONF_SCENE_CONTEXT = "scene_context"
 
 # -- alert target subentry data ------------------------------------------
+CONF_TARGET_NAME = "name"  # optional friendly name; derived if blank
 CONF_TARGET_SERVICE = "service"
 CONF_TARGET_MIN_SCORE = "min_score"
 CONF_TARGET_CAMERAS = "cameras"  # camera ids; empty list = all cameras
