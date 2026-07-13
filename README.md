@@ -280,13 +280,24 @@ alias, but new dashboards should use `custom:ai-camera-centre-card`.
 ## Releasing (maintainers)
 
 1. Bump `version` in `custom_components/ai_camera_centre/manifest.json` and
-   `VERSION` in `const.py` (keep them in sync)
-2. Commit, tag `vX.Y.Z`, push with tags
-3. Create a GitHub release from the tag — HACS offers the new version
+   `VERSION` in `const.py` (keep them in sync), and add a
+   [CHANGELOG.md](CHANGELOG.md) entry
+2. Commit, tag `vX.Y.Z`, push the branch and the tag
+3. **Publish a GitHub Release** from the tag (a tag on its own is not enough
+   — HACS installs from Releases, not bare tags)
+
+HACS store readiness (for eventual inclusion in the HACS default list):
+
+- Public repo with a **description** and **topics** (repo → About)
+- A **license** (`LICENSE`) and a `README`
+- Valid `hacs.json` and `manifest.json` (checked by the
+  [Validate workflow](.github/workflows/validate.yml): hassfest + HACS)
+- At least one **published Release**
 
 Brand assets (integration icon/logo) are documented in
 [docs/BRANDING.md](docs/BRANDING.md).
 
 ## Roadmap
 
-Planned features not yet built are tracked in [TODO.md](TODO.md).
+Shipped and planned features are tracked in [TODO.md](TODO.md); a
+version-by-version history is in [CHANGELOG.md](CHANGELOG.md).
