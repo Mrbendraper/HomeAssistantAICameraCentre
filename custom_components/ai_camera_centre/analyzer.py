@@ -50,6 +50,7 @@ from .const import (
     DEFAULT_SNAPSHOT_INTERVAL_MS,
     DEFAULT_TARGET_CONDITION,
     DOMAIN,
+    EVENT_ALERT,
     NOTIFY_ARMED,
     NOTIFY_AWAY,
     NOTIFY_AWAY_OR_ARMED,
@@ -255,6 +256,7 @@ class CameraPipeline:
             )
             async_dispatcher_send(self.hass, SIGNAL_NEW_ALERT, record)
             image_url = record["image"]
+            logged = True
         else:
             _LOGGER.debug(
                 "%s: alert (score %s) not archived (logging rules)",
@@ -262,9 +264,27 @@ class CameraPipeline:
                 report["score"],
             )
             image_url = f"{SNAPSHOTS_URL}/{os.path.basename(mid_path)}"
+            logged = False
 
+        self._fire_alert_event(report, image_url, logged)
         await self._maybe_trigger_alarmo(report)
         await self._notify(report, image_url)
+
+    @callback
+    def _fire_alert_event(
+        self, report: dict[str, Any], image_url: str, logged: bool
+    ) -> None:
+        """Fire ai_camera_centre_alert so users can build automations."""
+        self.hass.bus.async_fire(
+            EVENT_ALERT,
+            {
+                "camera_id": self.camera_id,
+                "camera_label": self.label,
+                "image": image_url,
+                "logged": logged,
+                **report,
+            },
+        )
 
     # -- selective logging (min score + time window) ---------------------
 

@@ -141,6 +141,27 @@ Each camera device exposes:
 | `switch.<camera>_analysis` | Turn a camera's automatic analysis off/on (holiday mode, gardener day). The *Analyze now* button and service still work while off |
 | `button.<camera>_analyze` | Run an analysis on demand |
 
+### Events
+
+Every alert fires an `ai_camera_centre_alert` event on the bus (whether or
+not it was archived), so you can build your own automations:
+
+```yaml
+trigger:
+  - trigger: event
+    event_type: ai_camera_centre_alert
+condition:
+  - "{{ trigger.event.data.score >= 7 }}"
+action:
+  - action: light.turn_on
+    target:
+      entity_id: light.porch
+```
+
+Event data: `camera_id`, `camera_label`, `score` (1–10), `short`, `detail`,
+`direction`, `carrying`, `activity`, `gate_state`, `gate_risk`, `image`
+(URL), and `logged` (whether it was archived to the history).
+
 ## How the pipeline works
 
 1. Any of the camera's motion triggers turns `on` (per-camera cooldown

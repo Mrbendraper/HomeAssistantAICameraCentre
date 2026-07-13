@@ -74,3 +74,7 @@ SNAPSHOTS_URL = f"/{DOMAIN}/snapshots"
 CARD_URL = f"/{DOMAIN}/ai-camera-centre-card.js"
 
 SIGNAL_NEW_ALERT = f"{DOMAIN}_new_alert"
+
+# fired on the HA event bus for every alert (logged or not) so users can
+# build their own automations
+EVENT_ALERT = f"{DOMAIN}_alert"

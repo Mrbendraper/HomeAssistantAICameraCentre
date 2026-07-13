@@ -49,6 +49,16 @@
 
 ## Backlog — further ideas (unscoped)
 
+_Done since 2.3.1 (unreleased, next tag):_
+- **HA event on every alert** ✅ — `ai_camera_centre_alert` fired on the bus
+  for every alert (logged or not) with the full report + `logged` flag.
+- **CI** ✅ — `.github/workflows/validate.yml` runs hassfest + the HACS
+  action (brands check skipped, since brands ship bundled) on push/PR/weekly.
+- **Diagnostics** ✅ — `diagnostics.py` dumps options, cameras, targets and
+  runtime state (no secrets to redact).
+
+_Still open:_
+
 - **Auto-inherit camera area** — when a camera device is created, look up
   the source camera entity's area (entity registry → its device/area) and
   set the AI Camera Centre device to the same area, so it doesn't need
