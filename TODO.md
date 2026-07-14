@@ -35,6 +35,11 @@
   import/logic errors that currently only surface on a live HA.
 - **Translations** — strings are translation-ready; add other languages
   once the text stabilises.
+- **Signed image URLs** — replace the capability-URL scheme (random
+  filenames on unauthenticated static paths) with signed, expiring URLs
+  (`http.async_sign_path`) for alert images; the card would fetch signed
+  URLs over the websocket, and notifications would embed a signed URL.
+  See SECURITY.md "Network surface".
 - **HACS default store** — after the repo description/topics are set,
   releases are published, and brand handling is confirmed, submit to the
   HACS default list (see README "Releasing").

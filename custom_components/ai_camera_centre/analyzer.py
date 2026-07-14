@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import secrets as py_secrets
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -494,12 +495,25 @@ class CameraPipeline:
         except Exception:  # noqa: BLE001 - alarmo missing / API change
             _LOGGER.exception("%s: failed to trigger Alarmo", self.camera_id)
 
+    def _clear_old_snapshots_sync(self) -> None:
+        try:
+            for name in os.listdir(self.store.snapshots_dir):
+                if name.startswith(f"{self.camera_id}_") and name.endswith(".jpg"):
+                    os.remove(os.path.join(self.store.snapshots_dir, name))
+        except OSError:
+            pass
+
     async def _capture_frames(self) -> list[str]:
+        # Snapshots are served on an unauthenticated static path (so they
+        # can be shown in notifications), so filenames carry a per-run
+        # random token to make the URLs unguessable (capability URLs).
+        await self.hass.async_add_executor_job(self._clear_old_snapshots_sync)
+        token = py_secrets.token_hex(8)
         paths: list[str] = []
         for i in range(1, self.snapshot_count + 1):
             image = await camera.async_get_image(self.hass, self.camera_entity)
             path = os.path.join(
-                self.store.snapshots_dir, f"{self.camera_id}_{i}.jpg"
+                self.store.snapshots_dir, f"{self.camera_id}_{token}_{i}.jpg"
             )
             await self.hass.async_add_executor_job(_write_file, path, image.content)
             paths.append(path)

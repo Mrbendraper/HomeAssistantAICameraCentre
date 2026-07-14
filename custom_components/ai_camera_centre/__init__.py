@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import shutil
 import time
 from datetime import timedelta
@@ -161,11 +162,22 @@ class AlertStore:
 
     async def async_log(self, data: dict[str, Any]) -> dict[str, Any]:
         src = data["image_path"]
+        # Archived images are served on an unauthenticated static path, so
+        # (a) never copy files from outside the allowed dirs (a malicious
+        # log_alert call could otherwise publish e.g. secrets.yaml), and
+        # (b) use an unguessable filename (capability URL).
+        if not (
+            src.startswith(self.base_dir + os.sep)
+            or self.hass.config.is_allowed_path(src)
+        ):
+            raise HomeAssistantError(
+                f"Path not allowed: {src} (add it to allowlist_external_dirs)"
+            )
         if not await self.hass.async_add_executor_job(os.path.isfile, src):
             raise HomeAssistantError(f"Snapshot not found: {src}")
         ts = time.time()
         camera_id = data["camera_id"]
-        fname = f"{int(ts * 1000)}.jpg"
+        fname = f"{int(ts * 1000)}_{secrets.token_hex(8)}.jpg"
         dest = os.path.join(self.images_dir, camera_id, fname)
         record = {
             "ts": round(ts, 3),
