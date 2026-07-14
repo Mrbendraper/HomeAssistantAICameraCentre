@@ -266,36 +266,8 @@ the default placeholder. If you're on 2026.3+ and still see the
 placeholder, hard-refresh the browser / reset the companion app's
 frontend cache. Details in [docs/BRANDING.md](docs/BRANDING.md).
 
-## Upgrading
+*Known issue in HACS* https://github.com/hacs/integration/issues/5171
 
-Update via HACS and restart. **2.3 is a fresh-config release**: cameras and
-alert targets are now config *subentries* (each its own device / native add
-button), and there is no automatic migration from the earlier development
-layout — if you are coming from a pre-2.3 build, remove and re-add the
-integration, then add your cameras and targets again. Stored alert history
-in `<config>/ai_camera_centre/` is unaffected. Dashboards using
-`custom:alert-history-card` (the pre-2.0 card name) keep working via an
-alias, but new dashboards should use `custom:ai-camera-centre-card`.
-
-## Releasing (maintainers)
-
-1. Bump `version` in `custom_components/ai_camera_centre/manifest.json` and
-   `VERSION` in `const.py` (keep them in sync), and add a
-   [CHANGELOG.md](CHANGELOG.md) entry
-2. Commit, tag `vX.Y.Z`, push the branch and the tag
-3. **Publish a GitHub Release** from the tag (a tag on its own is not enough
-   — HACS installs from Releases, not bare tags)
-
-HACS store readiness (for eventual inclusion in the HACS default list):
-
-- Public repo with a **description** and **topics** (repo → About)
-- A **license** (`LICENSE`) and a `README`
-- Valid `hacs.json` and `manifest.json` (checked by the
-  [Validate workflow](.github/workflows/validate.yml): hassfest + HACS)
-- At least one **published Release**
-
-Brand assets (integration icon/logo) are documented in
-[docs/BRANDING.md](docs/BRANDING.md).
 
 ## Roadmap
 
