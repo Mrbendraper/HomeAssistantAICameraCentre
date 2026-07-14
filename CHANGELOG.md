@@ -3,6 +3,22 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.5.1]
+
+### Security
+- Burst snapshots used fixed, predictable filenames on an unauthenticated
+  static path, allowing anyone who could reach the Home Assistant port to
+  poll near-live camera frames without logging in. Snapshot and archived
+  image filenames now carry a cryptographically random token (capability
+  URLs), and each run's snapshots replace the previous run's.
+- `log_alert`'s `image_path` is now restricted to the integration's storage
+  directory or `allowlist_external_dirs`, so arbitrary host files can no
+  longer be copied into the publicly served images directory.
+
+### Added
+- A real [SECURITY.md](SECURITY.md): private vulnerability reporting,
+  supported versions, and the integration's security model.
+
 ## [2.5.0]
 
 ### Added
