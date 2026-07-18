@@ -1,7 +1,7 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.5.1"
+VERSION = "2.6.0"
 
 # subentry types
 SUBENTRY_CAMERA = "camera"
@@ -28,6 +28,46 @@ CONF_LOG_WINDOW_START = "log_window_start"
 CONF_LOG_WINDOW_END = "log_window_end"
 # repeat-visitor context
 CONF_REPEAT_CONTEXT_MINUTES = "repeat_context_minutes"
+# AI personality / response-style override (global, wording only)
+CONF_RESPONSE_STYLE = "response_style"
+
+# -- motion-ignore processing gate (global "house" defaults) -------------
+# A trigger is only processed (snapshot burst + AI + notify) when the
+# presence, alarm and time gates ALL permit it. Manual runs (force) bypass.
+CONF_PROCESS_PRESENCE = "process_presence"
+CONF_PROCESS_ARMED = "process_armed"
+CONF_PROCESS_TIME_MODE = "process_time_mode"
+CONF_PROCESS_TIME_START = "process_time_start"
+CONF_PROCESS_TIME_END = "process_time_end"
+# entity whose state drives day/night for the time gate (above_horizon = day)
+CONF_SUN_ENTITY = "sun_entity"
+DEFAULT_SUN_ENTITY = "sun.sun"
+SUN_ABOVE_HORIZON = "above_horizon"
+
+# presence gate values
+PRESENCE_ALWAYS = "always"
+PRESENCE_ONLY_AWAY = "only_away"  # process only when nobody is home
+PRESENCE_ONLY_HOME = "only_home"  # process only when someone is home
+DEFAULT_PROCESS_PRESENCE = PRESENCE_ALWAYS
+
+# alarm gate values
+ARMED_ALWAYS = "always"
+ARMED_ONLY_ARMED = "only_armed"
+ARMED_ONLY_DISARMED = "only_disarmed"
+DEFAULT_PROCESS_ARMED = ARMED_ALWAYS
+
+# time gate values
+TIME_ALWAYS = "always"
+TIME_BETWEEN = "between"  # uses process_time_start / process_time_end
+TIME_DAY = "day"  # sun above horizon
+TIME_NIGHT = "night"  # sun below horizon
+DEFAULT_PROCESS_TIME_MODE = TIME_ALWAYS
+
+# per-camera processing policy
+POLICY_FOLLOW_HOUSE = "follow_house"
+POLICY_CUSTOM = "custom"
+DEFAULT_CAMERA_MOTION_POLICY = POLICY_FOLLOW_HOUSE
+CONF_CAMERA_MOTION_POLICY = "motion_policy"
 
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_SNAPSHOT_COUNT = 5
@@ -70,8 +110,17 @@ CONF_MOTION_ENTITIES = "motion_entities"
 CONF_SCENE_CONTEXT = "scene_context"
 
 # -- known visitor subentry data -----------------------------------------
+CONF_VISITOR_ID = "visitor_id"  # stable slug; keys the reference-photo dir
 CONF_VISITOR_NAME = "name"
 CONF_VISITOR_DESCRIPTION = "description"
+
+# reference photos per known visitor (visual recognition)
+KNOWN_DIR_NAME = "known"  # <config>/ai_camera_centre/known/<visitor_id>/*.jpg
+# how many reference photos to attach to the prompt (per person / overall)
+MAX_PHOTOS_PER_VISITOR = 2
+MAX_REFERENCE_PHOTOS = 6
+# upload limits for the photo endpoint
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024  # 8 MB
 
 # -- alert target subentry data ------------------------------------------
 CONF_TARGET_NAME = "name"  # optional friendly name; derived if blank
@@ -85,7 +134,11 @@ STORAGE_DIR = "ai_camera_centre"  # created under the HA config directory
 
 IMAGES_URL = f"/{DOMAIN}/images"
 SNAPSHOTS_URL = f"/{DOMAIN}/snapshots"
+KNOWN_URL = f"/{DOMAIN}/known"
 CARD_URL = f"/{DOMAIN}/ai-camera-centre-card.js"
+
+# authenticated HTTP endpoint the people card posts reference photos to
+UPLOAD_URL = f"/api/{DOMAIN}/known_photo"
 
 SIGNAL_NEW_ALERT = f"{DOMAIN}_new_alert"
 

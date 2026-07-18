@@ -41,7 +41,20 @@ card.
 - **Known visitors** — add household members and regulars (a name and a
   description) so the AI recognises them and scores them low; the recognised
   name is recorded on the alert (and, being low-scoring, they won't wake
-  targets whose minimum score is higher).
+  targets whose minimum score is higher). You can also **upload reference
+  photos** for each known person (via the bundled *AI Camera Centre People*
+  card); the photos are attached to the AI prompt so it can match faces
+  visually, not just by description.
+- **Motion-ignore processing rules** — skip AI analysis entirely (no snapshot,
+  no AI call, no notification — saving cost) unless the moment passes three
+  gates that must all agree: **presence** (e.g. only when nobody's home),
+  **alarm state** (e.g. only when armed) and **time** (a fixed window, or
+  daytime/nighttime by your sun entity). Set a house-wide default, and let each
+  camera either follow it or define its own. The *Analyze now* button and the
+  service always bypass these rules.
+- **AI response style** — give the alerts a personality (e.g. "in the style of
+  Samuel L. Jackson"). It shapes the wording only; the suspicion score and the
+  factual fields are unaffected.
 - **Repeat-visitor awareness** — a camera's recent alerts are fed back into
   the prompt so the AI can spot the same person returning or loitering and
   raise the score accordingly.
@@ -117,12 +130,23 @@ Copy `custom_components/ai_camera_centre/` into your
    household member or regular — a **name** and a **description** of
    distinguishing features (build, typical clothing, a pet, a wheelchair,
    etc.). The description is added to every camera's prompt so the AI can
-   recognise them and score them low.
+   recognise them and score them low. To also give the AI **reference photos**,
+   add an *AI Camera Centre People* card to a dashboard
+   (`type: custom:ai-camera-centre-people-card`) and upload photos for each
+   person there (admin only). Photos are stored under
+   `<config>/ai_camera_centre/known/` and attached to the AI prompt.
 5. Optional, in the integration's **Configure** button (global **Settings**):
    - **Alarm panel** — pick your `alarm_control_panel.*` to enable the armed
-     notify conditions and Alarmo triggering
+     notify conditions, Alarmo triggering, and the alarm-based processing rule
    - **Minimum score to log** / **log time window** — keep low-risk or
      daytime noise out of the history
+   - **Process motion based on presence / alarm state / time** — the
+     house-wide default for when to run AI analysis at all (all three must
+     agree). Time can be a fixed window or **daytime/nighttime** via the
+     **sun entity** (default `sun.sun`). Each camera can follow this default or
+     set its own under **Motion processing policy** when you add/edit it
+   - **AI response style / personality** — optional wording overlay for the
+     alert text (never changes the score)
    - **Recent-activity context window** — minutes of prior alerts fed back
      to the AI for repeat-visitor/loitering awareness (0 disables it)
    - **Trigger Alarmo** — sound Alarmo on high-risk alerts while armed
@@ -145,6 +169,17 @@ days: 7
 
 Tap a row to expand the full report; tap the expanded image for a
 full-screen lightbox (click or × to close).
+
+A second card manages reference photos for known people (same bundled
+resource, so no extra install):
+
+```yaml
+type: custom:ai-camera-centre-people-card
+title: Known People
+```
+
+It lists the known visitors you added on the integration page; upload or
+remove each person's photos here (admin only).
 
 If auto-registration of the resource fails (e.g. YAML-mode dashboards), add
 it manually: Settings → Dashboards → Resources → Add →

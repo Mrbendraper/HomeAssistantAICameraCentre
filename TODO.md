@@ -2,6 +2,12 @@
 
 ## Shipped
 
+- **2.6.0** — Motion-ignore processing rules (skip the whole pipeline based on
+  presence + alarm state + time, where time can be absolute or day/night from a
+  sun entity; house-wide default with a per-camera follow/custom policy).
+  Reference photos for known people (upload via the new **AI Camera Centre
+  People** card; attached to the AI prompt for visual recognition). Global AI
+  response style / personality override (wording only).
 - **2.5.0** — Known visitors (household members / regulars as a
   `known_visitor` subentry, injected into the prompt; recognised name
   recorded as `known_person`). Repeat-visitor context (recent alerts fed

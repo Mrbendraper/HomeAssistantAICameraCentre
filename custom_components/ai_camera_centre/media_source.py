@@ -19,7 +19,7 @@ from homeassistant.components.media_source import (
 )
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, IMAGES_URL, SNAPSHOTS_URL, STORAGE_DIR
+from .const import DOMAIN, IMAGES_URL, KNOWN_URL, SNAPSHOTS_URL, STORAGE_DIR
 
 
 async def async_get_media_source(hass: HomeAssistant) -> "CameraCentreMediaSource":
@@ -51,6 +51,8 @@ class CameraCentreMediaSource(MediaSource):
             raise Unresolvable(f"File not found: {item.identifier}")
         if item.identifier.startswith("snapshots/"):
             url = f"{SNAPSHOTS_URL}/{item.identifier.removeprefix('snapshots/')}"
+        elif item.identifier.startswith("known/"):
+            url = f"{KNOWN_URL}/{item.identifier.removeprefix('known/')}"
         else:
             url = f"{IMAGES_URL}/{item.identifier.removeprefix('images/')}"
         return PlayMedia(url=url, mime_type="image/jpeg", path=path)
