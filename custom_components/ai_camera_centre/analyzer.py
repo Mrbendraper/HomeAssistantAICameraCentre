@@ -24,45 +24,70 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ARMED_ONLY_ARMED,
+    ARMED_ONLY_DISARMED,
     ARMED_STATES,
     CONF_AI_TASK_ENTITY,
     CONF_ALARM_PANEL_ENTITY,
     CONF_ALARMO_ENABLED,
     CONF_ALARMO_TRIGGER_SCORE,
     CONF_CAMERA_ENTITY,
+    CONF_CAMERA_MOTION_POLICY,
     CONF_CAMERA_NAME,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
     CONF_LOG_WINDOW_END,
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
+    CONF_PROCESS_ARMED,
+    CONF_PROCESS_PRESENCE,
+    CONF_PROCESS_TIME_END,
+    CONF_PROCESS_TIME_MODE,
+    CONF_PROCESS_TIME_START,
     CONF_REPEAT_CONTEXT_MINUTES,
+    CONF_RESPONSE_STYLE,
     CONF_SCENE_CONTEXT,
     CONF_SNAPSHOT_COUNT,
     CONF_SNAPSHOT_INTERVAL_MS,
+    CONF_SUN_ENTITY,
     CONF_TARGET_CAMERAS,
     CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_SERVICE,
     CONF_VISITOR_DESCRIPTION,
+    CONF_VISITOR_ID,
     CONF_VISITOR_NAME,
     DEFAULT_ALARMO_TRIGGER_SCORE,
+    DEFAULT_CAMERA_MOTION_POLICY,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
     DEFAULT_MIN_LOG_SCORE,
+    DEFAULT_PROCESS_ARMED,
+    DEFAULT_PROCESS_PRESENCE,
+    DEFAULT_PROCESS_TIME_MODE,
     DEFAULT_REPEAT_CONTEXT_MINUTES,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
+    DEFAULT_SUN_ENTITY,
     ACTION_SOUND_ALARM,
     DEFAULT_TARGET_CONDITION,
     DOMAIN,
     EVENT_ALERT,
+    MAX_PHOTOS_PER_VISITOR,
+    MAX_REFERENCE_PHOTOS,
     NOTIFY_ARMED,
     NOTIFY_AWAY,
     NOTIFY_AWAY_OR_ARMED,
     NOTIFY_HIGH_SCORE,
+    POLICY_CUSTOM,
+    PRESENCE_ONLY_AWAY,
+    PRESENCE_ONLY_HOME,
     SIGNAL_NEW_ALERT,
     SNAPSHOTS_URL,
+    SUN_ABOVE_HORIZON,
+    TIME_BETWEEN,
+    TIME_DAY,
+    TIME_NIGHT,
 )
 
 if TYPE_CHECKING:
@@ -274,6 +299,12 @@ class CameraPipeline:
                 CONF_REPEAT_CONTEXT_MINUTES, DEFAULT_REPEAT_CONTEXT_MINUTES
             )
         )
+        # AI personality / response-style override (applied to wording only)
+        self.response_style = (global_options.get(CONF_RESPONSE_STYLE) or "").strip()
+        # sun entity driving the day/night processing gate
+        self.sun_entity = global_options.get(CONF_SUN_ENTITY) or DEFAULT_SUN_ENTITY
+        # effective motion-ignore gate: this camera's own override, else house
+        self.process = self._resolve_process_policy(global_options, camera_conf)
         # runtime state (survives pipeline rebuilds via the switch entity)
         self.paused = False
         # set False after the first structured-output failure so we don't
@@ -281,6 +312,26 @@ class CameraPipeline:
         self._structured_ok = True
         self._lock = asyncio.Lock()
         self._last_run = 0.0
+
+    @staticmethod
+    def _resolve_process_policy(
+        global_options: dict[str, Any], camera_conf: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Effective processing gate: the camera's override, or the house."""
+        use_camera = (
+            camera_conf.get(
+                CONF_CAMERA_MOTION_POLICY, DEFAULT_CAMERA_MOTION_POLICY
+            )
+            == POLICY_CUSTOM
+        )
+        src = camera_conf if use_camera else global_options
+        return {
+            "presence": src.get(CONF_PROCESS_PRESENCE, DEFAULT_PROCESS_PRESENCE),
+            "armed": src.get(CONF_PROCESS_ARMED, DEFAULT_PROCESS_ARMED),
+            "time_mode": src.get(CONF_PROCESS_TIME_MODE, DEFAULT_PROCESS_TIME_MODE),
+            "time_start": src.get(CONF_PROCESS_TIME_START),
+            "time_end": src.get(CONF_PROCESS_TIME_END),
+        }
 
     # -- triggering ------------------------------------------------------
 
@@ -299,6 +350,14 @@ class CameraPipeline:
         """Run the pipeline, respecting pause state and the per-camera cooldown."""
         if self.paused and not force:
             _LOGGER.debug("%s: analysis paused, skipping", self.camera_id)
+            return
+        # Motion-ignore gate: skip the whole pipeline (no snapshot, no AI, no
+        # notify) when the presence/alarm/time rules say so. A manual run
+        # (force) always bypasses it, like pause and cooldown.
+        if not force and not self._should_process():
+            _LOGGER.debug(
+                "%s: motion ignored by processing rule, skipping", self.camera_id
+            )
             return
         if self._lock.locked():
             _LOGGER.debug("%s: analysis already running, skipping", self.camera_id)
@@ -376,10 +435,15 @@ class CameraPipeline:
         return self._within_log_window()
 
     def _within_log_window(self) -> bool:
-        if not (self.log_window_start and self.log_window_end):
+        return self._time_in_window(self.log_window_start, self.log_window_end)
+
+    @staticmethod
+    def _time_in_window(start_s: Any, end_s: Any) -> bool:
+        """True if now is within [start, end); wraps past midnight. No window = True."""
+        if not (start_s and end_s):
             return True
-        start = dt_util.parse_time(self.log_window_start)
-        end = dt_util.parse_time(self.log_window_end)
+        start = dt_util.parse_time(start_s)
+        end = dt_util.parse_time(end_s)
         if start is None or end is None or start == end:
             return True
         now_t = dt_util.now().time()
@@ -388,11 +452,129 @@ class CameraPipeline:
         # window wraps past midnight (e.g. 22:00 -> 06:00)
         return now_t >= start or now_t < end
 
+    # -- motion-ignore processing gate (presence AND alarm AND time) -----
+
+    def _should_process(self) -> bool:
+        """All three gates must permit processing (AND)."""
+        return (
+            self._presence_gate_ok()
+            and self._armed_gate_ok()
+            and self._time_gate_ok()
+        )
+
+    def _presence_gate_ok(self) -> bool:
+        mode = self.process["presence"]
+        if mode == PRESENCE_ONLY_AWAY:
+            return not self._anyone_home()
+        if mode == PRESENCE_ONLY_HOME:
+            return self._anyone_home()
+        return True
+
+    def _armed_gate_ok(self) -> bool:
+        mode = self.process["armed"]
+        # Armed-based gates need an alarm panel; without one, fail open so the
+        # pipeline is never permanently disabled by a half-configured rule.
+        if not self.alarm_panel_entity:
+            return True
+        if mode == ARMED_ONLY_ARMED:
+            return self._is_armed()
+        if mode == ARMED_ONLY_DISARMED:
+            return not self._is_armed()
+        return True
+
+    def _time_gate_ok(self) -> bool:
+        mode = self.process["time_mode"]
+        if mode == TIME_BETWEEN:
+            return self._time_in_window(
+                self.process.get("time_start"), self.process.get("time_end")
+            )
+        if mode in (TIME_DAY, TIME_NIGHT):
+            daytime = self._is_daytime()
+            if daytime is None:
+                return True  # sun entity unavailable -> fail open
+            return daytime if mode == TIME_DAY else not daytime
+        return True
+
+    def _is_daytime(self) -> bool | None:
+        """True if the sun entity is above the horizon, None if unknown."""
+        state = self.hass.states.get(self.sun_entity)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return None
+        return state.state == SUN_ABOVE_HORIZON
+
     # -- prompt context (known people + recent activity) -----------------
 
     def _context_sections(self) -> str:
-        parts = [s for s in (self._known_people_section(), self._recent_activity()) if s]
+        parts = [
+            s
+            for s in (
+                self._known_people_section(),
+                self._recent_activity(),
+                self._response_style_section(),
+            )
+            if s
+        ]
         return ("\n\n" + "\n\n".join(parts)) if parts else ""
+
+    def _response_style_section(self) -> str:
+        """Personality/response-style overlay — wording only, never the score."""
+        if not self.response_style:
+            return ""
+        return (
+            f"RESPONSE STYLE: Write the 'short' and 'detail' text {self.response_style}. "
+            "This styling applies to WORDING ONLY — it must NOT change the "
+            "suspicion score, direction, gate assessment or any other factual "
+            "field, and you must still follow every rule above (including using "
+            '"No obvious motion detected" when nothing has actually moved).'
+        )
+
+    # -- known-visitor reference photos (visual recognition) -------------
+
+    def _reference_photos(
+        self, photos_by_id: dict[str, list[str]]
+    ) -> list[tuple[str, str]]:
+        """(name, media_content_id) for each attachable reference photo, capped."""
+        refs: list[tuple[str, str]] = []
+        for v in self.known_visitors:
+            vid = v.get(CONF_VISITOR_ID)
+            name = v.get(CONF_VISITOR_NAME)
+            photos = photos_by_id.get(vid) or []
+            if not (vid and name and photos):
+                continue
+            for fname in photos[:MAX_PHOTOS_PER_VISITOR]:
+                refs.append(
+                    (name, f"media-source://{DOMAIN}/known/{vid}/{fname}")
+                )
+                if len(refs) >= MAX_REFERENCE_PHOTOS:
+                    _LOGGER.debug(
+                        "%s: reference photos capped at %s",
+                        self.camera_id,
+                        MAX_REFERENCE_PHOTOS,
+                    )
+                    return refs
+        return refs
+
+    @staticmethod
+    def _reference_photo_note(
+        refs: list[tuple[str, str]], motion_count: int
+    ) -> str:
+        """Tell the model which leading images are reference photos."""
+        if not refs:
+            return ""
+        n = len(refs)
+        lines = "\n".join(
+            f"- Image {i + 1}: reference photo of {name}"
+            for i, (name, _cid) in enumerate(refs)
+        )
+        return (
+            f"\n\nIMAGE ORDER: The first {n} image{'s' if n != 1 else ''} "
+            "are reference photos of known people (NOT the motion event):\n"
+            f"{lines}\nThe remaining {motion_count} images are the motion "
+            "capture from the camera, in chronological order. Analyse ONLY the "
+            "motion-capture images for the event; use the reference photos "
+            'solely to decide whether the subject matches a known person (the '
+            '"known_person" field).'
+        )
 
     def _known_people_section(self) -> str:
         people = [
@@ -526,25 +708,36 @@ class CameraPipeline:
             f"{self.snapshot_interval:g} second"
             f"{'s' if self.snapshot_interval != 1 else ''}"
         )
+        photos_by_id = await self.hass.async_add_executor_job(
+            self.store.known_photos_map
+        )
+        refs = self._reference_photos(photos_by_id)
         instructions = (
             ANALYSIS_INSTRUCTIONS.format(
                 count=len(paths),
                 interval=interval,
                 scene_context=self.scene_context,
             )
+            + self._reference_photo_note(refs, len(paths))
             + self._context_sections()
         )
+        # Reference photos first, then the motion frames — the IMAGE ORDER
+        # note above tells the model which is which.
+        attachments = [
+            {"media_content_id": cid, "media_content_type": "image/jpeg"}
+            for _name, cid in refs
+        ] + [
+            {
+                "media_content_id": (
+                    f"media-source://{DOMAIN}/snapshots/{os.path.basename(p)}"
+                ),
+                "media_content_type": "image/jpeg",
+            }
+            for p in paths
+        ]
         base: dict[str, Any] = {
             "task_name": f"{self.label} analysis",
-            "attachments": [
-                {
-                    "media_content_id": (
-                        f"media-source://{DOMAIN}/snapshots/{os.path.basename(p)}"
-                    ),
-                    "media_content_type": "image/jpeg",
-                }
-                for p in paths
-            ],
+            "attachments": attachments,
         }
         if self.ai_task_entity:
             base["entity_id"] = self.ai_task_entity

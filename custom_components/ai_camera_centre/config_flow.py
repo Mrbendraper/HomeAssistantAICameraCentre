@@ -37,12 +37,16 @@ from homeassistant.helpers.selector import (
 from homeassistant.util import slugify
 
 from .const import (
+    ARMED_ALWAYS,
+    ARMED_ONLY_ARMED,
+    ARMED_ONLY_DISARMED,
     CONF_AI_TASK_ENTITY,
     CONF_ALARM_PANEL_ENTITY,
     CONF_ALARMO_ENABLED,
     CONF_ALARMO_TRIGGER_SCORE,
     CONF_CAMERA_ENTITY,
     CONF_CAMERA_ID,
+    CONF_CAMERA_MOTION_POLICY,
     CONF_CAMERA_NAME,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
@@ -50,35 +54,57 @@ from .const import (
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
     CONF_MOTION_ENTITIES,
+    CONF_PROCESS_ARMED,
+    CONF_PROCESS_PRESENCE,
+    CONF_PROCESS_TIME_END,
+    CONF_PROCESS_TIME_MODE,
+    CONF_PROCESS_TIME_START,
     CONF_REPEAT_CONTEXT_MINUTES,
+    CONF_RESPONSE_STYLE,
     CONF_RETENTION_DAYS,
     CONF_SCENE_CONTEXT,
     CONF_SNAPSHOT_COUNT,
     CONF_SNAPSHOT_INTERVAL_MS,
+    CONF_SUN_ENTITY,
     CONF_TARGET_CAMERAS,
     CONF_TARGET_CONDITION,
     CONF_TARGET_MIN_SCORE,
     CONF_TARGET_NAME,
     CONF_TARGET_SERVICE,
     CONF_VISITOR_DESCRIPTION,
+    CONF_VISITOR_ID,
     CONF_VISITOR_NAME,
     DEFAULT_ALARMO_TRIGGER_SCORE,
+    DEFAULT_CAMERA_MOTION_POLICY,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
     DEFAULT_MIN_LOG_SCORE,
+    DEFAULT_PROCESS_ARMED,
+    DEFAULT_PROCESS_PRESENCE,
+    DEFAULT_PROCESS_TIME_MODE,
     DEFAULT_REPEAT_CONTEXT_MINUTES,
     DEFAULT_RETENTION_DAYS,
     DEFAULT_SNAPSHOT_COUNT,
     DEFAULT_SNAPSHOT_INTERVAL_MS,
+    DEFAULT_SUN_ENTITY,
     DEFAULT_TARGET_CONDITION,
     DOMAIN,
     NOTIFY_ALWAYS,
     NOTIFY_ARMED,
     NOTIFY_AWAY,
     NOTIFY_AWAY_OR_ARMED,
+    POLICY_CUSTOM,
+    POLICY_FOLLOW_HOUSE,
+    PRESENCE_ALWAYS,
+    PRESENCE_ONLY_AWAY,
+    PRESENCE_ONLY_HOME,
     SUBENTRY_CAMERA,
     SUBENTRY_KNOWN_VISITOR,
     SUBENTRY_TARGET,
+    TIME_ALWAYS,
+    TIME_BETWEEN,
+    TIME_DAY,
+    TIME_NIGHT,
 )
 
 MOTION_DOMAINS = ["binary_sensor", "input_boolean", "switch"]
@@ -99,6 +125,10 @@ OPTIONAL_SETTINGS = (
     CONF_ALARM_PANEL_ENTITY,
     CONF_LOG_WINDOW_START,
     CONF_LOG_WINDOW_END,
+    CONF_SUN_ENTITY,
+    CONF_RESPONSE_STYLE,
+    CONF_PROCESS_TIME_START,
+    CONF_PROCESS_TIME_END,
 )
 
 NOTIFY_CONDITIONS = [
@@ -107,6 +137,74 @@ NOTIFY_CONDITIONS = [
     {"value": NOTIFY_ARMED, "label": "Only when the alarm is armed"},
     {"value": NOTIFY_AWAY_OR_ARMED, "label": "When away or armed"},
 ]
+
+# -- motion-ignore processing gate option lists --------------------------
+
+PRESENCE_OPTIONS = [
+    {"value": PRESENCE_ALWAYS, "label": "Always process"},
+    {"value": PRESENCE_ONLY_AWAY, "label": "Only when nobody is home"},
+    {"value": PRESENCE_ONLY_HOME, "label": "Only when someone is home"},
+]
+
+ARMED_OPTIONS = [
+    {"value": ARMED_ALWAYS, "label": "Always process"},
+    {"value": ARMED_ONLY_ARMED, "label": "Only when the alarm is armed"},
+    {"value": ARMED_ONLY_DISARMED, "label": "Only when the alarm is disarmed"},
+]
+
+TIME_OPTIONS = [
+    {"value": TIME_ALWAYS, "label": "Any time"},
+    {"value": TIME_BETWEEN, "label": "Between two times"},
+    {"value": TIME_DAY, "label": "Daytime only (sun above horizon)"},
+    {"value": TIME_NIGHT, "label": "Nighttime only (sun below horizon)"},
+]
+
+POLICY_OPTIONS = [
+    {"value": POLICY_FOLLOW_HOUSE, "label": "Follow the house settings"},
+    {"value": POLICY_CUSTOM, "label": "Custom for this camera"},
+]
+
+
+def _gate_fields(src: dict[str, Any]) -> dict[Any, Any]:
+    """The three processing-gate fields (presence / alarm / time window).
+
+    Shared by the global settings form and a camera's custom override, so both
+    read and write the same keys.
+    """
+    return {
+        vol.Required(
+            CONF_PROCESS_PRESENCE,
+            default=src.get(CONF_PROCESS_PRESENCE, DEFAULT_PROCESS_PRESENCE),
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=PRESENCE_OPTIONS, mode=SelectSelectorMode.DROPDOWN
+            )
+        ),
+        vol.Required(
+            CONF_PROCESS_ARMED,
+            default=src.get(CONF_PROCESS_ARMED, DEFAULT_PROCESS_ARMED),
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=ARMED_OPTIONS, mode=SelectSelectorMode.DROPDOWN
+            )
+        ),
+        vol.Required(
+            CONF_PROCESS_TIME_MODE,
+            default=src.get(CONF_PROCESS_TIME_MODE, DEFAULT_PROCESS_TIME_MODE),
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=TIME_OPTIONS, mode=SelectSelectorMode.DROPDOWN
+            )
+        ),
+        vol.Optional(
+            CONF_PROCESS_TIME_START,
+            description={"suggested_value": src.get(CONF_PROCESS_TIME_START)},
+        ): TimeSelector(),
+        vol.Optional(
+            CONF_PROCESS_TIME_END,
+            description={"suggested_value": src.get(CONF_PROCESS_TIME_END)},
+        ): TimeSelector(),
+    }
 
 
 # -- schema builders -----------------------------------------------------
@@ -190,6 +288,19 @@ def _settings_schema(options: dict[str, Any]) -> vol.Schema:
             ): NumberSelector(
                 NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
             ),
+            # -- motion-ignore processing gate (house defaults) ----------
+            **_gate_fields(options),
+            vol.Optional(
+                CONF_SUN_ENTITY,
+                description={
+                    "suggested_value": _get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY)
+                },
+            ): EntitySelector(EntitySelectorConfig(domain="sun")),
+            # -- AI personality / response style -------------------------
+            vol.Optional(
+                CONF_RESPONSE_STYLE,
+                description={"suggested_value": _get(CONF_RESPONSE_STYLE, None)},
+            ): TextSelector(TextSelectorConfig(multiline=True)),
         }
     )
 
@@ -218,6 +329,19 @@ def _camera_schema(camera: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_SCENE_CONTEXT,
                 description={"suggested_value": camera.get(CONF_SCENE_CONTEXT, "")},
             ): TextSelector(TextSelectorConfig(multiline=True)),
+            # Processing policy: follow the house gate, or override it here.
+            # The gate fields below only apply when "Custom" is selected.
+            vol.Required(
+                CONF_CAMERA_MOTION_POLICY,
+                default=camera.get(
+                    CONF_CAMERA_MOTION_POLICY, DEFAULT_CAMERA_MOTION_POLICY
+                ),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=POLICY_OPTIONS, mode=SelectSelectorMode.DROPDOWN
+                )
+            ),
+            **_gate_fields(camera),
         }
     )
 
@@ -308,6 +432,11 @@ def _clean_settings(user_input: dict[str, Any]) -> dict[str, Any]:
     for key in INT_SETTINGS:
         if key in cleaned:
             cleaned[key] = int(cleaned[key])
+    # Drop a blanked free-text style so OPTIONAL_SETTINGS can clear it.
+    if not str(cleaned.get(CONF_RESPONSE_STYLE, "")).strip():
+        cleaned.pop(CONF_RESPONSE_STYLE, None)
+    else:
+        cleaned[CONF_RESPONSE_STYLE] = cleaned[CONF_RESPONSE_STYLE].strip()
     return cleaned
 
 
@@ -317,9 +446,24 @@ def _clean_camera(user_input: dict[str, Any], camera_id: str) -> dict[str, Any]:
         CONF_CAMERA_NAME: user_input[CONF_CAMERA_NAME],
         CONF_CAMERA_ENTITY: user_input[CONF_CAMERA_ENTITY],
         CONF_MOTION_ENTITIES: user_input.get(CONF_MOTION_ENTITIES, []),
+        CONF_CAMERA_MOTION_POLICY: user_input.get(
+            CONF_CAMERA_MOTION_POLICY, DEFAULT_CAMERA_MOTION_POLICY
+        ),
+        CONF_PROCESS_PRESENCE: user_input.get(
+            CONF_PROCESS_PRESENCE, DEFAULT_PROCESS_PRESENCE
+        ),
+        CONF_PROCESS_ARMED: user_input.get(
+            CONF_PROCESS_ARMED, DEFAULT_PROCESS_ARMED
+        ),
+        CONF_PROCESS_TIME_MODE: user_input.get(
+            CONF_PROCESS_TIME_MODE, DEFAULT_PROCESS_TIME_MODE
+        ),
     }
     if scene := user_input.get(CONF_SCENE_CONTEXT):
         data[CONF_SCENE_CONTEXT] = scene
+    for key in (CONF_PROCESS_TIME_START, CONF_PROCESS_TIME_END):
+        if user_input.get(key):
+            data[key] = user_input[key]
     return data
 
 
@@ -354,8 +498,9 @@ def _visitor_schema(visitor: dict[str, Any] | None = None) -> vol.Schema:
     )
 
 
-def _clean_visitor(user_input: dict[str, Any]) -> dict[str, Any]:
+def _clean_visitor(user_input: dict[str, Any], visitor_id: str) -> dict[str, Any]:
     return {
+        CONF_VISITOR_ID: visitor_id,
         CONF_VISITOR_NAME: user_input[CONF_VISITOR_NAME].strip(),
         CONF_VISITOR_DESCRIPTION: user_input[CONF_VISITOR_DESCRIPTION].strip(),
     }
@@ -520,17 +665,29 @@ class AlertTargetSubentryFlow(ConfigSubentryFlow):
 class KnownVisitorSubentryFlow(ConfigSubentryFlow):
     """Add or edit a known visitor (household member / regular)."""
 
+    def _visitor_ids(self) -> set[str]:
+        return {
+            sub.data.get(CONF_VISITOR_ID)
+            for sub in self._get_entry().subentries.values()
+            if sub.subentry_type == SUBENTRY_KNOWN_VISITOR
+        }
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            visitor = _clean_visitor(user_input)
-            if not visitor[CONF_VISITOR_NAME]:
+            visitor_id = slugify(user_input.get(CONF_VISITOR_NAME, ""))
+            if not visitor_id:
                 errors[CONF_VISITOR_NAME] = "invalid_name"
+            elif visitor_id in self._visitor_ids():
+                errors[CONF_VISITOR_NAME] = "duplicate_visitor"
             else:
+                visitor = _clean_visitor(user_input, visitor_id)
                 return self.async_create_entry(
-                    title=visitor[CONF_VISITOR_NAME], data=visitor
+                    title=visitor[CONF_VISITOR_NAME],
+                    data=visitor,
+                    unique_id=visitor_id,
                 )
         return self.async_show_form(
             step_id="user", data_schema=_visitor_schema(), errors=errors
@@ -541,7 +698,13 @@ class KnownVisitorSubentryFlow(ConfigSubentryFlow):
     ) -> SubentryFlowResult:
         subentry = self._get_reconfigure_subentry()
         if user_input is not None:
-            visitor = _clean_visitor(user_input)
+            # Keep the original visitor_id (and its uploaded photos) on rename.
+            visitor_id = (
+                subentry.data.get(CONF_VISITOR_ID)
+                or slugify(subentry.data.get(CONF_VISITOR_NAME, ""))
+                or subentry.subentry_id
+            )
+            visitor = _clean_visitor(user_input, visitor_id)
             return self.async_update_and_abort(
                 self._get_entry(),
                 subentry,

@@ -343,9 +343,236 @@ customElements.define("ai-camera-centre-card", AICameraCentreCard);
 if (!customElements.get("alert-history-card")) {
   customElements.define("alert-history-card", class extends AICameraCentreCard {});
 }
+
+/* Known-people management card: upload/delete reference photos for the
+ * household members and regulars added on the integration page. The AI
+ * compares these photos against motion captures to recognise known people. */
+class AICameraCentrePeopleCard extends HTMLElement {
+  static getStubConfig() {
+    return { title: "Known People" };
+  }
+
+  setConfig(config) {
+    this._config = { title: "Known People", ...config };
+    this._visitors = [];
+    this._error = null;
+    this._busy = false;
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._loadedOnce) {
+      this._loadedOnce = true;
+      this._load();
+    }
+  }
+
+  connectedCallback() {
+    if (this._loadedOnce) this._load();
+  }
+
+  async _load() {
+    if (!this._hass) return;
+    try {
+      const resp = await this._hass.callWS({ type: "ai_camera_centre/visitors" });
+      this._visitors = resp.visitors || [];
+      this._error = null;
+    } catch (e) {
+      this._error =
+        "Could not load known people: " + (e.message || e.code || String(e));
+    }
+    this._render();
+  }
+
+  _esc(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async _upload(visitorId, file) {
+    if (!file || !this._hass) return;
+    this._busy = true;
+    this._error = null;
+    this._render();
+    try {
+      const fd = new FormData();
+      fd.append("visitor_id", visitorId);
+      fd.append("file", file);
+      const resp = await this._hass.fetchWithAuth(
+        "/api/ai_camera_centre/known_photo",
+        { method: "POST", body: fd }
+      );
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || "HTTP " + resp.status);
+      }
+      await this._load();
+    } catch (e) {
+      this._error = "Upload failed: " + (e.message || String(e));
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _delete(visitorId, filename) {
+    if (!this._hass) return;
+    try {
+      await this._hass.callWS({
+        type: "ai_camera_centre/delete_visitor_photo",
+        visitor_id: visitorId,
+        filename,
+      });
+      await this._load();
+    } catch (e) {
+      this._error = "Delete failed: " + (e.message || e.code || String(e));
+      this._render();
+    }
+  }
+
+  _person(v) {
+    const photos = (v.photos || [])
+      .map(
+        (p) => `
+        <div class="photo">
+          <img src="${this._esc(p.url)}" loading="lazy"
+               onerror="this.parentNode.style.display='none'">
+          <button class="photo-del" title="Remove photo"
+                  data-vid="${this._esc(v.visitor_id)}"
+                  data-file="${this._esc(p.filename)}">&times;</button>
+        </div>`
+      )
+      .join("");
+    return `
+      <div class="person">
+        <div class="person-head">
+          <span class="person-name">${this._esc(v.name || v.visitor_id)}</span>
+          <label class="add-btn">
+            + Add photo
+            <input class="upload-input" type="file" accept="image/*"
+                   data-vid="${this._esc(v.visitor_id)}" hidden>
+          </label>
+        </div>
+        ${
+          v.description
+            ? `<div class="person-desc">${this._esc(v.description)}</div>`
+            : ""
+        }
+        <div class="photos">${
+          photos || `<div class="no-photos">No reference photos yet.</div>`
+        }</div>
+      </div>`;
+  }
+
+  _render() {
+    const c = this._config;
+    let body;
+    if (this._error) {
+      body = `<div class="empty">${this._esc(this._error)}</div>`;
+    } else if (!this._visitors.length) {
+      body = `<div class="empty">No known people yet. Add household members and
+        regulars from Settings &rarr; Devices &amp; Services &rarr; AI Camera
+        Centre &rarr; Add known visitor, then upload their photos here.</div>`;
+    } else {
+      body = this._visitors.map((v) => this._person(v)).join("");
+    }
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; }
+        ha-card { padding: 12px 0 8px; }
+        .header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 0 16px 8px;
+        }
+        .title { font-size: 16px; font-weight: 500; color: var(--primary-text-color); }
+        .refresh {
+          background: none; border: none; cursor: pointer; padding: 4px;
+          color: var(--secondary-text-color); font-size: 16px; line-height: 1;
+        }
+        .person { padding: 10px 16px; border-top: 1px solid var(--divider-color); }
+        .person-head {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 8px;
+        }
+        .person-name { font-size: 14px; font-weight: 600; color: var(--primary-text-color); }
+        .person-desc {
+          font-size: 12px; color: var(--secondary-text-color);
+          margin: 2px 0 6px;
+        }
+        .add-btn {
+          border: 1px solid var(--primary-color); color: var(--primary-color);
+          border-radius: 14px; padding: 3px 12px; font-size: 12px;
+          cursor: pointer; white-space: nowrap;
+        }
+        .add-btn:hover { background: var(--secondary-background-color); }
+        .photos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .photo { position: relative; width: 84px; height: 84px; }
+        .photo img {
+          width: 100%; height: 100%; object-fit: cover; border-radius: 8px;
+          background: var(--divider-color);
+        }
+        .photo-del {
+          position: absolute; top: -6px; right: -6px;
+          width: 20px; height: 20px; border-radius: 50%;
+          border: none; background: #ef4444; color: #fff;
+          font-size: 14px; line-height: 1; cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+        }
+        .no-photos { font-size: 12px; color: var(--secondary-text-color); }
+        .empty {
+          padding: 20px 16px; text-align: center; font-size: 13px;
+          line-height: 1.5; color: var(--secondary-text-color);
+        }
+        .busy { padding: 6px 16px; font-size: 12px; color: var(--secondary-text-color); }
+      </style>
+      <ha-card>
+        <div class="header">
+          <span class="title">${this._esc(c.title)}</span>
+          <button class="refresh" title="Refresh">&#x21bb;</button>
+        </div>
+        ${this._busy ? `<div class="busy">Uploading&hellip;</div>` : ""}
+        ${body}
+      </ha-card>
+    `;
+
+    this.shadowRoot
+      .querySelector(".refresh")
+      .addEventListener("click", () => this._load());
+    this.shadowRoot.querySelectorAll(".upload-input").forEach((el) =>
+      el.addEventListener("change", (ev) => {
+        const file = ev.target.files && ev.target.files[0];
+        if (file) this._upload(el.dataset.vid, file);
+        ev.target.value = "";
+      })
+    );
+    this.shadowRoot.querySelectorAll(".photo-del").forEach((el) =>
+      el.addEventListener("click", () =>
+        this._delete(el.dataset.vid, el.dataset.file)
+      )
+    );
+  }
+
+  getCardSize() {
+    return 4;
+  }
+}
+
+customElements.define("ai-camera-centre-people-card", AICameraCentrePeopleCard);
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "ai-camera-centre-card",
   name: "AI Camera Centre Card",
   description: "Rolling multi-camera AI alert timeline (ai_camera_centre integration)",
+});
+window.customCards.push({
+  type: "ai-camera-centre-people-card",
+  name: "AI Camera Centre People",
+  description:
+    "Upload and manage reference photos of known people (ai_camera_centre integration)",
 });

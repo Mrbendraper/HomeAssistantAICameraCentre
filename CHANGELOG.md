@@ -3,6 +3,34 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.6.0]
+
+### Added
+- **Motion-ignore processing rules** — skip AI analysis entirely (no snapshot
+  burst, no AI call, no notification) based on three factors that must all
+  agree: **presence** (process always / only when nobody home / only when
+  someone home), **alarm state** (always / only armed / only disarmed) and
+  **time** (any time / between two times / daytime only / nighttime only,
+  where day/night follows a sun entity, default `sun.sun`). Configured as a
+  house-wide default in Settings, with a per-camera **motion processing
+  policy** that either follows the house or sets its own rules. The manual
+  *Analyze now* button and the `analyze` service always bypass these rules.
+  This is separate from the existing notify conditions (who gets pushed) and
+  log window (what gets archived); it gates whether the pipeline runs at all,
+  to save AI cost.
+- **Reference photos for known people** — upload one or more photos per known
+  visitor via the new **AI Camera Centre People** card
+  (`custom:ai-camera-centre-people-card`). Photos are attached to the AI
+  prompt so the model can visually recognise household members and regulars
+  (in addition to the existing text description) and record the matched name.
+  Uploads go through an authenticated, admin-only endpoint and are normalised
+  to a bounded JPEG; they are stored under
+  `<config>/ai_camera_centre/known/<visitor_id>/` and are not age-pruned.
+- **AI response style / personality** — an optional global free-text override
+  (e.g. "in the style of Samuel L. Jackson") that shapes the wording of the
+  short and detailed alert text. It is explicitly constrained to wording only
+  and never changes the suspicion score or any factual field.
+
 ## [2.5.1]
 
 ### Security

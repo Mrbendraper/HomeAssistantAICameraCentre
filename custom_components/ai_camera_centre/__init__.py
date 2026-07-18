@@ -19,8 +19,10 @@ from typing import Any
 
 import voluptuous as vol
 
+from aiohttp import web
+
 from homeassistant.components import websocket_api
-from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import (
@@ -40,6 +42,9 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers.http import KEY_HASS
+
+from homeassistant.util import slugify
 
 from .analyzer import CameraPipeline
 from .const import (
@@ -50,15 +55,22 @@ from .const import (
     CONF_CAMERA_ID,
     CONF_MOTION_ENTITIES,
     CONF_RETENTION_DAYS,
+    CONF_VISITOR_DESCRIPTION,
+    CONF_VISITOR_ID,
+    CONF_VISITOR_NAME,
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
     IMAGES_URL,
+    KNOWN_DIR_NAME,
+    KNOWN_URL,
+    MAX_UPLOAD_BYTES,
     SIGNAL_NEW_ALERT,
     SNAPSHOTS_URL,
     STORAGE_DIR,
     SUBENTRY_CAMERA,
     SUBENTRY_KNOWN_VISITOR,
     SUBENTRY_TARGET,
+    UPLOAD_URL,
     VERSION,
 )
 
@@ -96,6 +108,42 @@ LOG_ALERT_SCHEMA = vol.Schema(
 ANALYZE_SCHEMA = vol.Schema({vol.Required("camera_id"): cv.slug})
 
 
+# longest edge (px) reference photos are downscaled to — bounds storage and
+# the number of image tokens sent to the AI provider.
+_MAX_PHOTO_EDGE = 1024
+
+
+def _write_known_photo(raw: bytes, dest: str) -> None:
+    """Normalise an uploaded image to a bounded JPEG on disk.
+
+    Uses Pillow (ships with Home Assistant) to validate the bytes are a real
+    image, strip metadata, downscale, and re-encode as JPEG. If Pillow is
+    somehow unavailable, only genuine JPEG bytes are accepted as-is.
+    """
+    try:
+        import io
+
+        from PIL import Image  # noqa: PLC0415 - optional, imported lazily
+    except ImportError:
+        # No Pillow: accept only data that already looks like a JPEG.
+        if not raw.startswith(b"\xff\xd8\xff"):
+            raise HomeAssistantError(
+                "Uploaded file is not a JPEG and Pillow is unavailable to "
+                "convert it."
+            )
+        with open(dest, "wb") as fh:
+            fh.write(raw)
+        return
+
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            img = img.convert("RGB")
+            img.thumbnail((_MAX_PHOTO_EDGE, _MAX_PHOTO_EDGE))
+            img.save(dest, format="JPEG", quality=85)
+    except Exception as err:  # noqa: BLE001 - not a decodable image
+        raise HomeAssistantError(f"Invalid image upload: {err}") from err
+
+
 class AlertStore:
     """In-memory + on-disk (JSONL) store for alert records."""
 
@@ -104,6 +152,7 @@ class AlertStore:
         self.base_dir = base_dir
         self.images_dir = os.path.join(base_dir, "images")
         self.snapshots_dir = os.path.join(base_dir, "snapshots")
+        self.known_dir = os.path.join(base_dir, KNOWN_DIR_NAME)
         self.log_path = os.path.join(base_dir, "alerts.jsonl")
         self.retention_days = retention_days
         self.records: list[dict[str, Any]] = []
@@ -118,6 +167,7 @@ class AlertStore:
     def _load_sync(self) -> list[dict[str, Any]]:
         os.makedirs(self.images_dir, exist_ok=True)
         os.makedirs(self.snapshots_dir, exist_ok=True)
+        os.makedirs(self.known_dir, exist_ok=True)
         records: list[dict[str, Any]] = []
         if os.path.exists(self.log_path):
             with open(self.log_path, encoding="utf-8") as fh:
@@ -249,6 +299,54 @@ class AlertStore:
         fname = os.path.basename(image)
         return os.path.join(self.images_dir, record.get("camera", ""), fname)
 
+    # -- known-visitor reference photos ---------------------------------
+
+    def _visitor_dir(self, visitor_id: str) -> str:
+        """Directory for a visitor's photos, guarded against path escapes."""
+        if not visitor_id or visitor_id != slugify(visitor_id):
+            raise HomeAssistantError(f"Invalid visitor id: {visitor_id!r}")
+        return os.path.join(self.known_dir, visitor_id)
+
+    def known_photos_map(self) -> dict[str, list[str]]:
+        """{visitor_id: [filename, ...]} for every visitor with photos (sync)."""
+        result: dict[str, list[str]] = {}
+        if not os.path.isdir(self.known_dir):
+            return result
+        for vid in os.listdir(self.known_dir):
+            vdir = os.path.join(self.known_dir, vid)
+            if not os.path.isdir(vdir):
+                continue
+            files = sorted(
+                n for n in os.listdir(vdir) if n.lower().endswith(".jpg")
+            )
+            if files:
+                result[vid] = files
+        return result
+
+    def list_known_photos(self, visitor_id: str) -> list[str]:
+        """Photo filenames for one visitor, newest last (sync)."""
+        return self.known_photos_map().get(visitor_id, [])
+
+    def save_known_photo_sync(self, visitor_id: str, raw: bytes) -> str:
+        """Validate/normalise an uploaded image to JPEG and store it (sync)."""
+        vdir = self._visitor_dir(visitor_id)
+        os.makedirs(vdir, exist_ok=True)
+        fname = f"{int(time.time() * 1000)}_{secrets.token_hex(6)}.jpg"
+        dest = os.path.join(vdir, fname)
+        _write_known_photo(raw, dest)
+        return fname
+
+    def delete_known_photo_sync(self, visitor_id: str, filename: str) -> bool:
+        """Delete one of a visitor's photos (basename-scoped). Returns success."""
+        if os.path.basename(filename) != filename or not filename.endswith(".jpg"):
+            raise HomeAssistantError(f"Invalid filename: {filename!r}")
+        path = os.path.join(self._visitor_dir(visitor_id), filename)
+        try:
+            os.remove(path)
+            return True
+        except OSError:
+            return False
+
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/alerts"})
 @websocket_api.async_response
@@ -260,6 +358,141 @@ async def ws_list_alerts(
     """Return alert records to the frontend card."""
     store: AlertStore = hass.data[DOMAIN]["store"]
     connection.send_result(msg["id"], {"alerts": store.alerts()})
+
+
+def _known_visitors(entry: ConfigEntry) -> list[dict[str, str]]:
+    """Known-visitor subentries as {visitor_id, name, description}."""
+    out: list[dict[str, str]] = []
+    for sub in entry.subentries.values():
+        if sub.subentry_type != SUBENTRY_KNOWN_VISITOR:
+            continue
+        data = dict(sub.data)
+        vid = (
+            data.get(CONF_VISITOR_ID)
+            or slugify(data.get(CONF_VISITOR_NAME, ""))
+            or sub.subentry_id
+        )
+        out.append(
+            {
+                CONF_VISITOR_ID: vid,
+                CONF_VISITOR_NAME: data.get(CONF_VISITOR_NAME, ""),
+                CONF_VISITOR_DESCRIPTION: data.get(CONF_VISITOR_DESCRIPTION, ""),
+            }
+        )
+    return out
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/visitors"})
+@websocket_api.async_response
+async def ws_list_visitors(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return known visitors and their reference-photo URLs for the card."""
+    data = hass.data.get(DOMAIN, {})
+    store: AlertStore | None = data.get("store")
+    entry: ConfigEntry | None = data.get("entry")
+    if store is None or entry is None:
+        connection.send_result(msg["id"], {"visitors": []})
+        return
+    photo_map = await hass.async_add_executor_job(store.known_photos_map)
+    visitors = [
+        {
+            **v,
+            "photos": [
+                {"filename": f, "url": f"{KNOWN_URL}/{v[CONF_VISITOR_ID]}/{f}"}
+                for f in photo_map.get(v[CONF_VISITOR_ID], [])
+            ],
+        }
+        for v in _known_visitors(entry)
+    ]
+    connection.send_result(msg["id"], {"visitors": visitors})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/delete_visitor_photo",
+        vol.Required("visitor_id"): str,
+        vol.Required("filename"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_delete_visitor_photo(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Delete one of a visitor's reference photos (admin only)."""
+    data = hass.data.get(DOMAIN, {})
+    store: AlertStore | None = data.get("store")
+    entry: ConfigEntry | None = data.get("entry")
+    if store is None or entry is None:
+        connection.send_error(msg["id"], "not_ready", "Integration not ready")
+        return
+    valid_ids = {v[CONF_VISITOR_ID] for v in _known_visitors(entry)}
+    if msg["visitor_id"] not in valid_ids:
+        connection.send_error(msg["id"], "unknown_visitor", "Unknown visitor")
+        return
+    try:
+        deleted = await hass.async_add_executor_job(
+            store.delete_known_photo_sync, msg["visitor_id"], msg["filename"]
+        )
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "invalid_filename", str(err))
+        return
+    connection.send_result(msg["id"], {"deleted": deleted})
+
+
+class KnownPhotoUploadView(HomeAssistantView):
+    """Authenticated endpoint the people card posts reference photos to."""
+
+    url = UPLOAD_URL
+    name = f"api:{DOMAIN}:known_photo"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app[KEY_HASS]
+        user = request["hass_user"]
+        if user is None or not user.is_admin:
+            return web.Response(status=403, text="Admin privileges required")
+        data = hass.data.get(DOMAIN, {})
+        store: AlertStore | None = data.get("store")
+        entry: ConfigEntry | None = data.get("entry")
+        if store is None or entry is None:
+            return web.Response(status=503, text="Integration not ready")
+        # Cheap up-front guard on the declared size (multipart adds overhead).
+        if request.content_length and request.content_length > MAX_UPLOAD_BYTES * 2:
+            return web.Response(status=413, text="File too large")
+        try:
+            post = await request.post()
+        except Exception:  # noqa: BLE001 - malformed multipart
+            return web.Response(status=400, text="Invalid form data")
+        visitor_id = str(post.get("visitor_id", ""))
+        valid_ids = {v[CONF_VISITOR_ID] for v in _known_visitors(entry)}
+        if visitor_id not in valid_ids:
+            return web.Response(status=400, text="Unknown visitor")
+        field = post.get("file")
+        if field is None or not hasattr(field, "file"):
+            return web.Response(status=400, text="No file uploaded")
+        ctype = (getattr(field, "content_type", "") or "").lower()
+        if ctype and not ctype.startswith("image/"):
+            return web.Response(status=400, text="Uploaded file is not an image")
+        raw = await hass.async_add_executor_job(field.file.read)
+        if not raw:
+            return web.Response(status=400, text="Empty file")
+        if len(raw) > MAX_UPLOAD_BYTES:
+            return web.Response(status=413, text="File too large")
+        try:
+            fname = await hass.async_add_executor_job(
+                store.save_known_photo_sync, visitor_id, raw
+            )
+        except HomeAssistantError as err:
+            return web.Response(status=400, text=str(err))
+        return web.json_response(
+            {"filename": fname, "url": f"{KNOWN_URL}/{visitor_id}/{fname}"}
+        )
 
 
 async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
@@ -298,8 +531,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["store"] = store
+    # Kept current across reloads so the websocket/upload handlers can read the
+    # known-visitor subentries of the (single) config entry.
+    hass.data[DOMAIN]["entry"] = entry
 
-    # Static paths and websocket command survive reloads; register once.
+    # Static paths, websocket commands and the upload view survive reloads;
+    # register once.
     if not hass.data[DOMAIN].get("http_registered"):
         card_path = os.path.join(
             os.path.dirname(__file__), "www", "ai-camera-centre-card.js"
@@ -308,10 +545,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             [
                 StaticPathConfig(IMAGES_URL, store.images_dir, False),
                 StaticPathConfig(SNAPSHOTS_URL, store.snapshots_dir, False),
+                StaticPathConfig(KNOWN_URL, store.known_dir, False),
                 StaticPathConfig(CARD_URL, card_path, True),
             ]
         )
         websocket_api.async_register_command(hass, ws_list_alerts)
+        websocket_api.async_register_command(hass, ws_list_visitors)
+        websocket_api.async_register_command(hass, ws_delete_visitor_photo)
+        hass.http.register_view(KnownPhotoUploadView())
         hass.data[DOMAIN]["http_registered"] = True
 
     # -- built-in analysis pipelines (one per camera subentry) ---------
@@ -320,11 +561,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for sub in entry.subentries.values()
         if sub.subentry_type == SUBENTRY_TARGET
     ]
-    known_visitors = [
-        dict(sub.data)
-        for sub in entry.subentries.values()
-        if sub.subentry_type == SUBENTRY_KNOWN_VISITOR
-    ]
+    # Normalised so every visitor carries a stable visitor_id (legacy visitors
+    # predating the id get a computed fallback) matching the photo dir keys.
+    known_visitors = _known_visitors(entry)
 
     pipelines: dict[str, CameraPipeline] = {}
     for sub in entry.subentries.values():
@@ -459,4 +698,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_ANALYZE)
         hass.data[DOMAIN].pop("store", None)
         hass.data[DOMAIN].pop("pipelines", None)
+        hass.data[DOMAIN].pop("entry", None)
     return unload_ok

@@ -17,7 +17,14 @@
           "log_window_start": "Only log alerts after this time (optional)",
           "log_window_end": "Only log alerts before this time (optional)",
           "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
-          "alarmo_trigger_score": "Score at or above which Alarmo is triggered"
+          "alarmo_trigger_score": "Score at or above which Alarmo is triggered",
+          "process_presence": "Process motion based on presence (house default)",
+          "process_armed": "Process motion based on alarm state (house default)",
+          "process_time_mode": "Process motion based on time (house default)",
+          "process_time_start": "Custom window start (used when 'Between two times' is selected)",
+          "process_time_end": "Custom window end (used when 'Between two times' is selected)",
+          "sun_entity": "Sun entity used for day/night (default sun.sun)",
+          "response_style": "AI response style / personality (optional — e.g. \"in the style of Samuel L. Jackson\"; affects wording only, never the score)"
         }
       }
     },
@@ -29,7 +36,7 @@
     "step": {
       "init": {
         "title": "AI Camera Centre settings",
-        "description": "The 'armed' notify conditions and Alarmo triggering both need an alarm panel selected. Time-window logging only records alerts within the chosen hours (leave blank to log at any time). Add or edit cameras and alert targets from the integration page.",
+        "description": "The 'armed' notify conditions and Alarmo triggering both need an alarm panel selected. Time-window logging only records alerts within the chosen hours (leave blank to log at any time). The 'Process motion' rules are the house-wide default for skipping AI analysis entirely (presence AND alarm AND time must all allow it); each camera can follow this or set its own. Add or edit cameras and alert targets from the integration page.",
         "data": {
           "retention_days": "Alert retention (days)",
           "snapshot_count": "Snapshots per analysis",
@@ -43,7 +50,14 @@
           "log_window_start": "Only log alerts after this time (optional)",
           "log_window_end": "Only log alerts before this time (optional)",
           "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
-          "alarmo_trigger_score": "Score at or above which Alarmo is triggered"
+          "alarmo_trigger_score": "Score at or above which Alarmo is triggered",
+          "process_presence": "Process motion based on presence (house default)",
+          "process_armed": "Process motion based on alarm state (house default)",
+          "process_time_mode": "Process motion based on time (house default)",
+          "process_time_start": "Custom window start (used when 'Between two times' is selected)",
+          "process_time_end": "Custom window end (used when 'Between two times' is selected)",
+          "sun_entity": "Sun entity used for day/night (default sun.sun)",
+          "response_style": "AI response style / personality (optional — e.g. \"in the style of Samuel L. Jackson\"; affects wording only, never the score)"
         }
       }
     }
@@ -63,7 +77,13 @@
             "name": "Camera name",
             "camera_entity": "Camera stream entity",
             "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service or the Analyze button)",
-            "scene_context": "Scene context for the AI (optional)"
+            "scene_context": "Scene context for the AI (optional)",
+            "motion_policy": "Motion processing policy (follow the house settings, or set custom rules below)",
+            "process_presence": "Custom: process motion based on presence",
+            "process_armed": "Custom: process motion based on alarm state",
+            "process_time_mode": "Custom: process motion based on time",
+            "process_time_start": "Custom window start (used when 'Between two times' is selected)",
+            "process_time_end": "Custom window end (used when 'Between two times' is selected)"
           }
         },
         "reconfigure": {
@@ -73,7 +93,13 @@
             "name": "Camera name",
             "camera_entity": "Camera stream entity",
             "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service or the Analyze button)",
-            "scene_context": "Scene context for the AI (optional)"
+            "scene_context": "Scene context for the AI (optional)",
+            "motion_policy": "Motion processing policy (follow the house settings, or set custom rules below)",
+            "process_presence": "Custom: process motion based on presence",
+            "process_armed": "Custom: process motion based on alarm state",
+            "process_time_mode": "Custom: process motion based on time",
+            "process_time_start": "Custom window start (used when 'Between two times' is selected)",
+            "process_time_end": "Custom window end (used when 'Between two times' is selected)"
           }
         }
       },
@@ -141,7 +167,8 @@
         }
       },
       "error": {
-        "invalid_name": "Please enter a name."
+        "invalid_name": "Please enter a name.",
+        "duplicate_visitor": "A known person with this name already exists."
       }
     }
   }
