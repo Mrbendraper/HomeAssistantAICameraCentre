@@ -66,8 +66,10 @@ card.
 - **Per-camera devices** placed automatically in the same **area** as your
   source camera entity (you can move them afterwards).
 - **Bundled timeline card** — rolling history grouped by day, camera filter
-  chips, score badges, tap to expand the full image and report. Served by
-  the integration and auto-registered as a dashboard resource.
+  chips, score badges, tap to expand the full image and report. New alerts
+  appear live over a websocket subscription (no polling). Served by the
+  integration and auto-registered as a dashboard resource. Archived alert
+  images are delivered as signed, expiring URLs rather than public links.
 - **Automatic retention** — alerts and images older than N days (default 7)
   are pruned automatically.
 - **Per-camera entities** — every camera device carries: an *Alerts (24h)*

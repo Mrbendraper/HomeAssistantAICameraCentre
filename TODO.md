@@ -2,6 +2,11 @@
 
 ## Shipped
 
+- **2.7.0** — Live card updates (new alerts push to the timeline card over a
+  websocket subscription instead of the 5-minute poll). Signed, expiring URLs
+  for archived alert images (served behind auth via `async_sign_path` with the
+  content-user token, retention-length expiry; snapshots/known photos still use
+  capability URLs).
 - **2.6.0** — Motion-ignore processing rules (skip the whole pipeline based on
   presence + alarm state + time, where time can be absolute or day/night from a
   sun entity; house-wide default with a per-camera follow/custom policy).
@@ -34,8 +39,6 @@
   prune on the retention schedule, offer playback on the card (reuse the
   lightbox) and attach the clip URL to the notification. Add a toggle +
   clip-length setting (recording adds load/storage). Needs live testing.
-- **Live card updates** — push new alerts to the Lovelace card over a
-  websocket subscription instead of the current 5-minute poll.
 - **Tests** — _initial suite landed_: `tests/` covers the store, the
   motion-ignore processing gate, the config/options flows, and the
   known-photo upload endpoint + websocket commands, run in CI on every push
@@ -44,11 +47,10 @@
   flows.
 - **Translations** — strings are translation-ready; add other languages
   once the text stabilises.
-- **Signed image URLs** — replace the capability-URL scheme (random
-  filenames on unauthenticated static paths) with signed, expiring URLs
-  (`http.async_sign_path`) for alert images; the card would fetch signed
-  URLs over the websocket, and notifications would embed a signed URL.
-  See SECURITY.md "Network surface".
+- **Signed image URLs for snapshots + known photos** — extend the 2.7.0
+  signed-URL scheme (currently alert images only) to the burst snapshots and
+  known-visitor reference photos, removing the remaining capability-URL
+  surfaces. See SECURITY.md "Network surface".
 - **HACS default store** — after the repo description/topics are set,
   releases are published, and brand handling is confirmed, submit to the
   HACS default list (see README "Releasing").

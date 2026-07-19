@@ -23,6 +23,7 @@ from aiohttp import web
 
 from homeassistant.components import websocket_api
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
+from homeassistant.components.http.auth import async_sign_path
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import (
@@ -37,7 +38,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.dispatcher import (
+    async_dispatcher_connect,
+    async_dispatcher_send,
+)
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
@@ -348,6 +352,38 @@ class AlertStore:
             return False
 
 
+@callback
+def _sign_image(hass: HomeAssistant, url: str, retention_days: int) -> str:
+    """Sign an archived alert-image URL so it can be fetched without a bearer.
+
+    Only IMAGES_URL paths are signed (snapshots/known photos stay as capability
+    URLs). The signature is tied to HA's stable content-user token and expires
+    with the retention window — the image is pruned by then anyway.
+    """
+    if not url.startswith(IMAGES_URL + "/"):
+        return url
+    return async_sign_path(
+        hass,
+        url,
+        timedelta(days=max(1, int(retention_days))),
+        use_content_user=True,
+    )
+
+
+@callback
+def _signed_alert(hass: HomeAssistant, record: dict[str, Any], days: int) -> dict[str, Any]:
+    """A copy of an alert record with its image URL signed."""
+    signed = dict(record)
+    signed["image"] = _sign_image(hass, record.get("image", ""), days)
+    return signed
+
+
+@callback
+def _signed_alerts(hass: HomeAssistant, store: "AlertStore") -> list[dict[str, Any]]:
+    days = store.retention_days
+    return [_signed_alert(hass, rec, days) for rec in store.alerts()]
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/alerts"})
 @websocket_api.async_response
 async def ws_list_alerts(
@@ -355,9 +391,37 @@ async def ws_list_alerts(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return alert records to the frontend card."""
+    """Return alert records (with signed image URLs) to the frontend card."""
     store: AlertStore = hass.data[DOMAIN]["store"]
-    connection.send_result(msg["id"], {"alerts": store.alerts()})
+    connection.send_result(msg["id"], {"alerts": _signed_alerts(hass, store)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/subscribe"})
+@callback
+def ws_subscribe_alerts(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Push each new alert to the card live, so it needn't poll."""
+    store: AlertStore | None = hass.data.get(DOMAIN, {}).get("store")
+    if store is None:
+        connection.send_error(msg["id"], "not_ready", "Integration not ready")
+        return
+
+    @callback
+    def _forward(record: dict[str, Any]) -> None:
+        connection.send_message(
+            websocket_api.event_message(
+                msg["id"],
+                {"alert": _signed_alert(hass, record, store.retention_days)},
+            )
+        )
+
+    connection.subscriptions[msg["id"]] = async_dispatcher_connect(
+        hass, SIGNAL_NEW_ALERT, _forward
+    )
+    connection.send_result(msg["id"])
 
 
 def _known_visitors(entry: ConfigEntry) -> list[dict[str, str]]:
@@ -498,6 +562,32 @@ class KnownPhotoUploadView(HomeAssistantView):
         )
 
 
+class AlertImageView(HomeAssistantView):
+    """Serve archived alert images behind auth so signed URLs are required.
+
+    Replaces the old unauthenticated static path: a request with a valid
+    signed URL (`?authSig=…`) or a bearer token succeeds; anything else 401s.
+    """
+
+    url = IMAGES_URL + "/{tail:.+}"
+    name = f"api:{DOMAIN}:image"
+    requires_auth = True
+
+    async def get(self, request: web.Request, tail: str) -> web.StreamResponse:
+        hass: HomeAssistant = request.app[KEY_HASS]
+        store: AlertStore | None = hass.data.get(DOMAIN, {}).get("store")
+        if store is None:
+            return web.Response(status=503, text="Integration not ready")
+        base = os.path.realpath(store.images_dir)
+        path = os.path.realpath(os.path.join(base, tail))
+        # Never serve outside the images directory (path-traversal guard).
+        if not (path == base or path.startswith(base + os.sep)):
+            return web.Response(status=404)
+        if not await hass.async_add_executor_job(os.path.isfile, path):
+            return web.Response(status=404)
+        return web.FileResponse(path)
+
+
 async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
     """Best-effort auto-registration of the bundled card."""
     try:
@@ -544,18 +634,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         card_path = os.path.join(
             os.path.dirname(__file__), "www", "ai-camera-centre-card.js"
         )
+        # Archived alert images are served behind auth (signed URLs); burst
+        # snapshots and known-visitor photos remain capability URLs.
         await hass.http.async_register_static_paths(
             [
-                StaticPathConfig(IMAGES_URL, store.images_dir, False),
                 StaticPathConfig(SNAPSHOTS_URL, store.snapshots_dir, False),
                 StaticPathConfig(KNOWN_URL, store.known_dir, False),
                 StaticPathConfig(CARD_URL, card_path, True),
             ]
         )
         websocket_api.async_register_command(hass, ws_list_alerts)
+        websocket_api.async_register_command(hass, ws_subscribe_alerts)
         websocket_api.async_register_command(hass, ws_list_visitors)
         websocket_api.async_register_command(hass, ws_delete_visitor_photo)
         hass.http.register_view(KnownPhotoUploadView())
+        hass.http.register_view(AlertImageView())
         hass.data[DOMAIN]["http_registered"] = True
 
     # -- built-in analysis pipelines (one per camera subentry) ---------
