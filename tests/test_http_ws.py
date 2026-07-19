@@ -34,7 +34,16 @@ def _png() -> bytes:
     return buf.getvalue()
 
 
+# Heavy optional dependencies that aren't needed at our setup time. ai_task
+# pulls conversation -> hassil (a large tree phccc doesn't install); camera and
+# media_source aren't touched during setup either. Marking them present lets the
+# config entry set up without installing that tree.
+STUB_COMPONENTS = ("camera", "ai_task", "conversation", "media_source")
+
+
 async def _setup(hass: HomeAssistant) -> MockConfigEntry:
+    for comp in STUB_COMPONENTS:
+        hass.config.components.add(comp)
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={},
