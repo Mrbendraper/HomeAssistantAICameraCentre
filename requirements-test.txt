@@ -1,0 +1,5 @@
+# Test dependencies for the AI Camera Centre integration.
+# pytest-homeassistant-custom-component pulls in Home Assistant, pytest, and
+# the HA-specific fixtures/plugins. Pin loosely; CI installs the latest that
+# matches the Home Assistant version this integration targets (>= 2025.8).
+pytest-homeassistant-custom-component
