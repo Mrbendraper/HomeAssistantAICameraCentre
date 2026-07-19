@@ -340,13 +340,35 @@ class CameraPipeline:
 
     @callback
     def handle_motion_event(self, event: Event) -> None:
-        """State-change listener for the configured motion entity."""
+        """State-change listener for the configured motion entity.
+
+        Every exit path logs at debug. Without this the trigger is a black
+        box: a camera that never fires looks identical to one that was never
+        subscribed, with nothing in the log to tell them apart.
+        """
+        entity_id = event.data.get("entity_id")
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
+        old = None if old_state is None else old_state.state
+        new = None if new_state is None else new_state.state
         if new_state is None or new_state.state != "on":
+            _LOGGER.debug(
+                "%s: %s changed %s -> %s; not a motion start, ignoring",
+                self.camera_id, entity_id, old, new,
+            )
             return
         if old_state is not None and old_state.state == "on":
+            # The source integration re-asserted "on" without ever clearing
+            # to "off", so there is no edge to trigger on.
+            _LOGGER.debug(
+                "%s: %s re-asserted 'on' (no off->on edge), ignoring",
+                self.camera_id, entity_id,
+            )
             return
+        _LOGGER.debug(
+            "%s: %s changed %s -> on, starting analysis",
+            self.camera_id, entity_id, old,
+        )
         self.hass.async_create_task(self.async_analyze())
 
     async def async_analyze(self, force: bool = False) -> None:

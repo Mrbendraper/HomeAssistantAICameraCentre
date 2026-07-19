@@ -3,6 +3,28 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.8.1]
+
+### Fixed
+- **Analysis switch could silently pause a camera forever.** The per-camera
+  *Analysis* switch restores its state on startup, but any restored value that
+  wasn't literally `"on"` was treated as off — including `unavailable` and
+  `unknown`, which is what gets saved when the config entry is reloaded (every
+  settings/camera edit) or Home Assistant shuts down uncleanly. The affected
+  camera's pipeline was then left paused: motion triggers were dropped before
+  any snapshot, AI call or notification, with only a debug-level line to show
+  for it, while *Analyze now* kept working (it bypasses the pause). Only a
+  genuine `on`/`off` restore is honoured now; anything else falls back to the
+  default (on).
+
+### Added
+- **Debug logging on every motion-trigger path.** `handle_motion_event`
+  previously returned silently, so a camera that never fired was
+  indistinguishable in the log from one that was never subscribed. Each exit
+  now logs at debug, naming the triggering entity and its state transition —
+  including the "re-asserted `on` without an intervening `off`" case, where a
+  source integration that misses the clear leaves no edge to trigger on.
+
 ## [2.8.0]
 
 ### Added
