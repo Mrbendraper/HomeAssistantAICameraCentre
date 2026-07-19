@@ -31,6 +31,15 @@ All notable changes to AI Camera Centre. Versions follow the
   short and detailed alert text. It is explicitly constrained to wording only
   and never changes the suspicion score or any factual field.
 
+### Security
+- The known-photo upload endpoint no longer echoes internal exception detail
+  in its HTTP error response; failures return a generic message and the detail
+  is logged server-side instead (CodeQL: information exposure through an
+  exception).
+- The `validate` GitHub workflow now declares an explicit least-privilege
+  `permissions: contents: read` (CodeQL: workflow does not contain
+  permissions).
+
 ## [2.5.1]
 
 ### Security
