@@ -3,6 +3,18 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.6.2]
+
+### Changed
+- Quality/hardening release. Added an automated test suite
+  (`pytest-homeassistant-custom-component`) covering the alert store, the
+  motion-ignore processing gate, the config/options flows, and the
+  known-photo upload endpoint plus the `visitors` / `delete_visitor_photo`
+  websocket commands — the last of which exercise the live HTTP/websocket
+  stack (view registration, auth, and the 2.6.1 upload-error hardening). A
+  `pytest` job now runs the suite in CI (`validate.yml`, Python 3.13) on
+  every push and pull request. No runtime behaviour changes.
+
 ## [2.6.1]
 
 ### Security
