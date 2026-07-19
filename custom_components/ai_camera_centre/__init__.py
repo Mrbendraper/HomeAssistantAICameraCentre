@@ -489,7 +489,10 @@ class KnownPhotoUploadView(HomeAssistantView):
                 store.save_known_photo_sync, visitor_id, raw
             )
         except HomeAssistantError as err:
-            return web.Response(status=400, text=str(err))
+            _LOGGER.warning(
+                "Known photo upload failed for visitor_id=%s: %s", visitor_id, err
+            )
+            return web.Response(status=400, text="Unable to save uploaded photo")
         return web.json_response(
             {"filename": fname, "url": f"{KNOWN_URL}/{visitor_id}/{fname}"}
         )
