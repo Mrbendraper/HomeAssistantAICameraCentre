@@ -10,7 +10,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import STATE_OFF, STATE_ON, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -50,9 +50,13 @@ class AnalysisSwitch(CameraEntityMixin, SwitchEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         last = await self.async_get_last_state()
-        if last is not None:
-            self._attr_is_on = last.state == "on"
-        # Apply the restored state to the (freshly built) pipeline.
+        # Only honour a genuine on/off restore. A reload or an unclean
+        # shutdown can leave the saved state as "unavailable"/"unknown";
+        # reading that as "off" would silently pause the camera's analysis
+        # indefinitely, with only a debug line to show for it.
+        if last is not None and last.state in (STATE_ON, STATE_OFF):
+            self._attr_is_on = last.state == STATE_ON
+        # Apply the effective state to the (freshly built) pipeline.
         self._pipeline.paused = not self._attr_is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:

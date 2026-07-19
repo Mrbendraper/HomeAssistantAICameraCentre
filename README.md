@@ -308,6 +308,25 @@ entity is actually flipping under Developer Tools → States, and cross-check th
 ids each camera is configured with in the integration's **Download
 diagnostics** (⋮ menu).
 
+**A camera doesn't react to motion** — turn on debug logging and trigger it;
+every step of the trigger path reports what it did:
+
+```yaml
+logger:
+  logs:
+    custom_components.ai_camera_centre: debug
+```
+
+Then check Settings → System → Logs for that camera. You'll see one of:
+`changed off -> on, starting analysis` (the trigger fired — look further down
+the pipeline); `re-asserted 'on' (no off->on edge)` (the source integration
+never cleared the sensor to `off`, so there was no edge to fire on);
+`analysis paused, skipping` (the camera's **Analysis** switch is off);
+`motion ignored by processing rule, skipping` (the presence / alarm / time
+gate blocked it — check the camera's **Motion processing** section);
+`within cooldown, skipping`; or **nothing at all**, which means the configured
+motion entity never fired and the id is likely stale (see above).
+
 **Notifications don't arrive** — verify the alert target's minimum score
 isn't filtering the alert out, and that its camera filter (if any) includes
 the camera. Each delivery failure is logged.
