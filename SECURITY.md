@@ -38,19 +38,28 @@ What this integration touches, and the choices behind it:
 
 ### Network surface
 
-- **Alert images, burst snapshots and the Lovelace card are served on
-  unauthenticated static paths** (`/ai_camera_centre/images/…`,
-  `/ai_camera_centre/snapshots/…`, like Home Assistant's own `/local/`).
-  This is required so dashboard `<img>` tags and mobile notifications can
-  load them (neither can attach auth tokens). Mitigation: filenames carry
-  a cryptographically random token (capability URLs), so images cannot be
-  enumerated or guessed — but anyone who obtains a full URL can fetch that
-  image without logging in. Treat alert-image URLs as sensitive, and don't
-  expose your Home Assistant port to the internet without additional
-  protection.
-- The card's data feed (`ai_camera_centre/alerts` websocket command) and
-  all services require Home Assistant **authentication**. Any authenticated
-  user can view alert history and call `analyze`/`log_alert`.
+- **Archived alert images use signed, expiring URLs.** They are served
+  behind an authenticated endpoint (`/ai_camera_centre/images/…`,
+  `requires_auth`); the card `<img>`, mobile notifications and the
+  `ai_camera_centre_alert` event are handed **signed URLs** (`?authSig=…`,
+  via `async_sign_path` with Home Assistant's content-user token) so they
+  load without a bearer token, while an unsigned request is rejected (401).
+  The signature expires with the retention window and is revocable by
+  rotating Home Assistant's sign secret, so a leaked link is bounded in time
+  rather than usable forever.
+- **Burst snapshots and known-visitor photos are still served on
+  unauthenticated static paths** (`/ai_camera_centre/snapshots/…`,
+  `/ai_camera_centre/known/…`, like Home Assistant's own `/local/`).
+  Mitigation: filenames carry a cryptographically random token (capability
+  URLs), so they cannot be enumerated or guessed — but anyone who obtains a
+  full URL can fetch that file without logging in. Snapshots are transient
+  (overwritten on the next capture); treat known-photo URLs as sensitive, and
+  don't expose your Home Assistant port to the internet without additional
+  protection. (Signing these too is on the roadmap.)
+- The card's data feed (the `ai_camera_centre/alerts` and
+  `ai_camera_centre/subscribe` websocket commands) and all services require
+  Home Assistant **authentication**. Any authenticated user can view alert
+  history and call `analyze`/`log_alert`.
 - `log_alert`'s `image_path` is restricted to the integration's own storage
   directory or paths in `allowlist_external_dirs` — arbitrary files on the
   host cannot be published.
@@ -77,5 +86,6 @@ What this integration touches, and the choices behind it:
 
 ## Hardening roadmap
 
-- Signed, expiring URLs for alert images (would replace the
-  capability-URL scheme; needs frontend/notification support).
+- Extend signed, expiring URLs (shipped for alert images in 2.7.0) to the
+  burst snapshots and known-visitor photos, retiring the remaining
+  capability-URL surfaces.

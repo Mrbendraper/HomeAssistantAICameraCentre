@@ -3,6 +3,28 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.7.0]
+
+### Added
+- **Live card updates** — the timeline card now receives new alerts over a
+  websocket subscription and shows them instantly, instead of polling every
+  five minutes.
+
+### Changed
+- **Signed, expiring URLs for alert images** — archived alert images are no
+  longer served on an unauthenticated static path. They now go through an
+  authenticated endpoint and are handed out as **signed URLs that expire with
+  the retention window**, tied to Home Assistant's content-user token. The
+  card `<img>`, the mobile notification, and the `ai_camera_centre_alert`
+  event image all use signed URLs, so they still load without a bearer token,
+  but the links can no longer be fetched by anyone who happens to obtain them
+  after they expire. Burst snapshots and known-visitor photos keep the
+  existing capability-URL scheme.
+  - **Breaking:** any dashboard or automation that hard-coded a raw
+    `/ai_camera_centre/images/…` URL must instead use the signed URL from the
+    card feed or the `ai_camera_centre_alert` event. Unsigned requests to that
+    path now return 401.
+
 ## [2.6.2]
 
 ### Changed

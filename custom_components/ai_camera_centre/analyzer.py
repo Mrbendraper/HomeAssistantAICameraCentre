@@ -15,9 +15,11 @@ import os
 import re
 import secrets as py_secrets
 import time
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import camera
+from homeassistant.components.http.auth import async_sign_path
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -73,6 +75,7 @@ from .const import (
     DEFAULT_TARGET_CONDITION,
     DOMAIN,
     EVENT_ALERT,
+    IMAGES_URL,
     MAX_PHOTOS_PER_VISITOR,
     MAX_REFERENCE_PHOTOS,
     NOTIFY_ARMED,
@@ -407,9 +410,24 @@ class CameraPipeline:
             image_url = f"{SNAPSHOTS_URL}/{os.path.basename(mid_path)}"
             logged = False
 
+        # Archived images are served behind auth, so hand out a signed URL the
+        # card <img>, the companion app and user automations can load without a
+        # bearer. Transient snapshot URLs pass through unsigned.
+        image_url = self._sign(image_url)
         self._fire_alert_event(report, image_url, logged)
         await self._maybe_trigger_alarmo(report)
         await self._notify(report, image_url)
+
+    def _sign(self, url: str) -> str:
+        """Sign an archived alert-image URL (retention-length, content-user)."""
+        if not url.startswith(IMAGES_URL + "/"):
+            return url
+        return async_sign_path(
+            self.hass,
+            url,
+            timedelta(days=max(1, int(self.store.retention_days))),
+            use_content_user=True,
+        )
 
     @callback
     def _fire_alert_event(

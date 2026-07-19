@@ -30,15 +30,55 @@ class AICameraCentreCard extends HTMLElement {
       this._loadedOnce = true;
       this._load();
     }
+    this._subscribe();
   }
 
   connectedCallback() {
+    this._disconnected = false;
     if (this._loadedOnce) this._load();
-    this._timer = setInterval(() => this._load(), 5 * 60 * 1000);
+    this._subscribe();
   }
 
   disconnectedCallback() {
-    clearInterval(this._timer);
+    this._disconnected = true;
+    if (this._unsub) {
+      this._unsub();
+      this._unsub = null;
+    }
+  }
+
+  // Live updates: subscribe once and let new alerts push in, instead of
+  // polling. Falls back silently to the manual refresh button on error.
+  async _subscribe() {
+    if (!this._hass || this._unsub || this._subscribing) return;
+    this._subscribing = true;
+    try {
+      const unsub = await this._hass.connection.subscribeMessage(
+        (m) => this._onEvent(m),
+        { type: "ai_camera_centre/subscribe" }
+      );
+      if (this._disconnected) unsub();
+      else this._unsub = unsub;
+    } catch (e) {
+      // no live feed; _load() and the refresh button still work
+    } finally {
+      this._subscribing = false;
+    }
+  }
+
+  _onEvent(msg) {
+    const a = msg && msg.alert;
+    if (!a) return;
+    const cutoff = Date.now() / 1000 - this._config.days * 86400;
+    if (Number(a.ts) < cutoff) return;
+    if (
+      this._alerts.some(
+        (x) => x.camera === a.camera && Number(x.ts) === Number(a.ts)
+      )
+    )
+      return;
+    this._alerts = [a, ...this._alerts].sort((x, y) => y.ts - x.ts);
+    this._render();
   }
 
   async _load() {
