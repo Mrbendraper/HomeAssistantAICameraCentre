@@ -55,12 +55,15 @@ async def _log_alert(hass: HomeAssistant) -> dict:
 
 
 async def _first_alert_image(hass, hass_ws_client) -> str:
+    # The alert store persists to the config dir, which is shared across tests
+    # in this module, so don't assume an empty store — just take the newest
+    # (alerts come back newest-first).
     ws = await hass_ws_client(hass)
     await ws.send_json({"id": 1, "type": "ai_camera_centre/alerts"})
     msg = await ws.receive_json()
     assert msg["success"]
     alerts = msg["result"]["alerts"]
-    assert len(alerts) == 1
+    assert alerts
     return alerts[0]["image"]
 
 
