@@ -2,6 +2,10 @@
 
 ## Shipped
 
+- **2.8.0** — Grouped settings UI (global and per-camera forms organised into
+  collapsible sections with headings, section descriptions and per-field help
+  text). Startup warning when a camera's configured motion-trigger entity id no
+  longer exists, so a stale/renamed trigger no longer fails silently.
 - **2.7.0** — Live card updates (new alerts push to the timeline card over a
   websocket subscription instead of the 5-minute poll). Signed, expiring URLs
   for archived alert images (served behind auth via `async_sign_path` with the

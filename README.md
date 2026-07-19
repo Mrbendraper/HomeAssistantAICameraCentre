@@ -137,21 +137,23 @@ Copy `custom_components/ai_camera_centre/` into your
    (`type: custom:ai-camera-centre-people-card`) and upload photos for each
    person there (admin only). Photos are stored under
    `<config>/ai_camera_centre/known/` and attached to the AI prompt.
-5. Optional, in the integration's **Configure** button (global **Settings**):
-   - **Alarm panel** — pick your `alarm_control_panel.*` to enable the armed
-     notify conditions, Alarmo triggering, and the alarm-based processing rule
-   - **Minimum score to log** / **log time window** — keep low-risk or
-     daytime noise out of the history
-   - **Process motion based on presence / alarm state / time** — the
-     house-wide default for when to run AI analysis at all (all three must
-     agree). Time can be a fixed window or **daytime/nighttime** via the
-     **sun entity** (default `sun.sun`). Each camera can follow this default or
-     set its own under **Motion processing policy** when you add/edit it
-   - **AI response style / personality** — optional wording overlay for the
-     alert text (never changes the score)
-   - **Recent-activity context window** — minutes of prior alerts fed back
-     to the AI for repeat-visitor/loitering awareness (0 disables it)
-   - **Trigger Alarmo** — sound Alarmo on high-risk alerts while armed
+5. Optional, in the integration's **Configure** button (global **Settings**).
+   The settings are grouped into collapsible sections, each with inline help:
+   - **Capture & analysis** — snapshots per analysis, the delay between them,
+     the per-camera cooldown, and which **AI Task entity** analyses the frames
+   - **Alerts & history** — **minimum score to log**, retention, the
+     recent-activity context window (repeat-visitor/loitering awareness), an
+     optional **log time window**, and the dashboard notifications open
+   - **Alarm & Alarmo** — pick your `alarm_control_panel.*` to enable the
+     armed notify conditions and the alarm-based processing rule, and
+     optionally **trigger Alarmo** on high-risk alerts while armed
+   - **Motion processing (house default)** — the house-wide default for when
+     to run AI analysis at all: **presence AND alarm state AND time** must all
+     agree. Time can be a fixed window or **daytime/nighttime** via the **sun
+     entity** (default `sun.sun`). Each camera can follow this default or set
+     its own under the **Motion processing** section when you add/edit it
+   - **AI response style** — optional wording overlay for the alert text
+     (never changes the score)
 6. Repeat for each camera and target. That's it — walk in front of a camera
    to test, use its *Analyze now* button, or call the service manually:
 
@@ -291,6 +293,20 @@ JavaScript isn't reaching your browser. Check, in order:
 you need one configured (e.g. Google Generative AI or OpenAI) and either
 set as the default AI Task entity or selected in this integration's
 Settings.
+
+**One camera triggers, another (with identical settings) doesn't** — the
+usual cause is a **motion-trigger entity id that no longer exists**. A camera
+is wired to its trigger by exact entity id, so if that id changes — the source
+camera integration was updated, the device was re-added, or the entity was
+renamed — the source integration still shows motion but this integration never
+runs, and the two cameras diverge even though their AI Camera Centre config
+looks the same. Since 2.8.0 this is logged at startup:
+*"Camera '…': motion trigger … not found in Home Assistant …"* — check
+Settings → System → Logs. The fix is to **edit the camera and re-select its
+Motion triggers** so they point at the current entity. You can confirm which
+entity is actually flipping under Developer Tools → States, and cross-check the
+ids each camera is configured with in the integration's **Download
+diagnostics** (⋮ menu).
 
 **Notifications don't arrive** — verify the alert target's minimum score
 isn't filtering the alert out, and that its camera filter (if any) includes

@@ -3,28 +3,88 @@
     "step": {
       "user": {
         "title": "AI Camera Centre",
-        "description": "Global settings — you can change these later, and add cameras and alert targets from the integration page once setup finishes.",
-        "data": {
-          "retention_days": "Alert retention (days)",
-          "snapshot_count": "Snapshots per analysis",
-          "snapshot_interval_ms": "Snapshot interval (ms)",
-          "cooldown_seconds": "Cooldown between analyses per camera (seconds)",
-          "dashboard_path": "Dashboard path opened by notifications",
-          "ai_task_entity": "AI Task entity (blank = Home Assistant's default)",
-          "alarm_panel_entity": "Alarm panel (optional — enables the 'armed' notify conditions and Alarmo triggering)",
-          "min_log_score": "Minimum score to log an alert (1 = log every real alert)",
-          "repeat_context_minutes": "Recent-activity context window in minutes (0 = off) — lets the AI spot the same person returning or loitering",
-          "log_window_start": "Only log alerts after this time (optional)",
-          "log_window_end": "Only log alerts before this time (optional)",
-          "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
-          "alarmo_trigger_score": "Score at or above which Alarmo is triggered",
-          "process_presence": "Process motion based on presence (house default)",
-          "process_armed": "Process motion based on alarm state (house default)",
-          "process_time_mode": "Process motion based on time (house default)",
-          "process_time_start": "Custom window start (used when 'Between two times' is selected)",
-          "process_time_end": "Custom window end (used when 'Between two times' is selected)",
-          "sun_entity": "Sun entity used for day/night (default sun.sun)",
-          "response_style": "AI response style / personality (optional — e.g. \"in the style of Samuel L. Jackson\"; affects wording only, never the score)"
+        "description": "Set up the global defaults. You can change all of these later, and add cameras, alert targets and known people from the integration page once setup finishes.",
+        "sections": {
+          "capture": {
+            "name": "Capture & analysis",
+            "description": "What each trigger captures, and how often a camera may re-run.",
+            "data": {
+              "snapshot_count": "Snapshots per analysis",
+              "snapshot_interval_ms": "Delay between snapshots (ms)",
+              "cooldown_seconds": "Cooldown between analyses (seconds)",
+              "ai_task_entity": "AI Task entity"
+            },
+            "data_description": {
+              "snapshot_count": "How many frames are grabbed for each event. More frames give the AI more to compare, but take longer to capture.",
+              "snapshot_interval_ms": "Milliseconds between frames in the burst.",
+              "cooldown_seconds": "Per camera. Motion within this many seconds of the last analysis is ignored, preventing alert storms.",
+              "ai_task_entity": "Which AI provider analyses the snapshots. Leave blank to use Home Assistant's default AI Task entity."
+            }
+          },
+          "alerts": {
+            "name": "Alerts & history",
+            "description": "Which alerts are kept, for how long, and where notifications open.",
+            "data": {
+              "min_log_score": "Minimum score to log",
+              "retention_days": "Keep alerts for (days)",
+              "repeat_context_minutes": "Recent-activity window (minutes)",
+              "log_window_start": "Only log after (optional)",
+              "log_window_end": "Only log before (optional)",
+              "dashboard_path": "Dashboard opened by notifications"
+            },
+            "data_description": {
+              "min_log_score": "Only archive alerts at or above this suspicion score (1 logs every real alert). Filtered-out alerts can still notify.",
+              "retention_days": "Alerts and their images older than this are pruned automatically.",
+              "repeat_context_minutes": "Feeds a camera's recent alerts back to the AI so it can spot the same person returning or loitering. 0 disables it.",
+              "log_window_start": "Leave both times blank to log at any hour.",
+              "log_window_end": "Alerts outside the window are not archived, but can still notify.",
+              "dashboard_path": "The path a tapped notification opens, e.g. /lovelace/alerts."
+            }
+          },
+          "alarm": {
+            "name": "Alarm & Alarmo",
+            "description": "Optional alarm panel. Required for the armed-based notify and processing rules, and for triggering Alarmo.",
+            "data": {
+              "alarm_panel_entity": "Alarm panel (optional)",
+              "alarmo_enabled": "Trigger Alarmo on high-risk alerts",
+              "alarmo_trigger_score": "Alarmo trigger score"
+            },
+            "data_description": {
+              "alarm_panel_entity": "Your alarm_control_panel entity. Enables the 'armed' notify conditions and Alarmo triggering.",
+              "alarmo_enabled": "Only fires while the panel is already armed.",
+              "alarmo_trigger_score": "Score at or above which Alarmo is triggered."
+            }
+          },
+          "processing": {
+            "name": "Motion processing (house default)",
+            "description": "Skip AI analysis entirely unless presence, alarm state and time all allow it — saving cost and noise. Each camera can follow this or set its own. 'Analyze now' and the service always bypass it.",
+            "data": {
+              "process_presence": "Process based on presence",
+              "process_armed": "Process based on alarm state",
+              "process_time_mode": "Process based on time",
+              "process_time_start": "Window start",
+              "process_time_end": "Window end",
+              "sun_entity": "Sun entity for day/night"
+            },
+            "data_description": {
+              "process_presence": "e.g. only when nobody is home.",
+              "process_armed": "Needs an alarm panel set above.",
+              "process_time_mode": "Any time, a fixed window, or daytime/nighttime from your sun entity.",
+              "process_time_start": "Used when 'Between two times' is selected.",
+              "process_time_end": "Used when 'Between two times' is selected.",
+              "sun_entity": "Drives the daytime/nighttime option. Default sun.sun."
+            }
+          },
+          "ai": {
+            "name": "AI response style",
+            "description": "Optional personality for alert wording. Never changes the score or the factual fields.",
+            "data": {
+              "response_style": "Response style / personality"
+            },
+            "data_description": {
+              "response_style": "e.g. \"in the style of Samuel L. Jackson\"."
+            }
+          }
         }
       }
     },
@@ -36,28 +96,88 @@
     "step": {
       "init": {
         "title": "AI Camera Centre settings",
-        "description": "The 'armed' notify conditions and Alarmo triggering both need an alarm panel selected. Time-window logging only records alerts within the chosen hours (leave blank to log at any time). The 'Process motion' rules are the house-wide default for skipping AI analysis entirely (presence AND alarm AND time must all allow it); each camera can follow this or set its own. Add or edit cameras and alert targets from the integration page.",
-        "data": {
-          "retention_days": "Alert retention (days)",
-          "snapshot_count": "Snapshots per analysis",
-          "snapshot_interval_ms": "Snapshot interval (ms)",
-          "cooldown_seconds": "Cooldown between analyses per camera (seconds)",
-          "dashboard_path": "Dashboard path opened by notifications",
-          "ai_task_entity": "AI Task entity (blank = Home Assistant's default)",
-          "alarm_panel_entity": "Alarm panel (optional — enables the 'armed' notify conditions and Alarmo triggering)",
-          "min_log_score": "Minimum score to log an alert (1 = log every real alert)",
-          "repeat_context_minutes": "Recent-activity context window in minutes (0 = off) — lets the AI spot the same person returning or loitering",
-          "log_window_start": "Only log alerts after this time (optional)",
-          "log_window_end": "Only log alerts before this time (optional)",
-          "alarmo_enabled": "Trigger Alarmo on high-risk alerts (only while the panel is armed)",
-          "alarmo_trigger_score": "Score at or above which Alarmo is triggered",
-          "process_presence": "Process motion based on presence (house default)",
-          "process_armed": "Process motion based on alarm state (house default)",
-          "process_time_mode": "Process motion based on time (house default)",
-          "process_time_start": "Custom window start (used when 'Between two times' is selected)",
-          "process_time_end": "Custom window end (used when 'Between two times' is selected)",
-          "sun_entity": "Sun entity used for day/night (default sun.sun)",
-          "response_style": "AI response style / personality (optional — e.g. \"in the style of Samuel L. Jackson\"; affects wording only, never the score)"
+        "description": "Global defaults for every camera. Add or edit cameras, alert targets and known people from the integration page.",
+        "sections": {
+          "capture": {
+            "name": "Capture & analysis",
+            "description": "What each trigger captures, and how often a camera may re-run.",
+            "data": {
+              "snapshot_count": "Snapshots per analysis",
+              "snapshot_interval_ms": "Delay between snapshots (ms)",
+              "cooldown_seconds": "Cooldown between analyses (seconds)",
+              "ai_task_entity": "AI Task entity"
+            },
+            "data_description": {
+              "snapshot_count": "How many frames are grabbed for each event. More frames give the AI more to compare, but take longer to capture.",
+              "snapshot_interval_ms": "Milliseconds between frames in the burst.",
+              "cooldown_seconds": "Per camera. Motion within this many seconds of the last analysis is ignored, preventing alert storms.",
+              "ai_task_entity": "Which AI provider analyses the snapshots. Leave blank to use Home Assistant's default AI Task entity."
+            }
+          },
+          "alerts": {
+            "name": "Alerts & history",
+            "description": "Which alerts are kept, for how long, and where notifications open.",
+            "data": {
+              "min_log_score": "Minimum score to log",
+              "retention_days": "Keep alerts for (days)",
+              "repeat_context_minutes": "Recent-activity window (minutes)",
+              "log_window_start": "Only log after (optional)",
+              "log_window_end": "Only log before (optional)",
+              "dashboard_path": "Dashboard opened by notifications"
+            },
+            "data_description": {
+              "min_log_score": "Only archive alerts at or above this suspicion score (1 logs every real alert). Filtered-out alerts can still notify.",
+              "retention_days": "Alerts and their images older than this are pruned automatically.",
+              "repeat_context_minutes": "Feeds a camera's recent alerts back to the AI so it can spot the same person returning or loitering. 0 disables it.",
+              "log_window_start": "Leave both times blank to log at any hour.",
+              "log_window_end": "Alerts outside the window are not archived, but can still notify.",
+              "dashboard_path": "The path a tapped notification opens, e.g. /lovelace/alerts."
+            }
+          },
+          "alarm": {
+            "name": "Alarm & Alarmo",
+            "description": "Optional alarm panel. Required for the armed-based notify and processing rules, and for triggering Alarmo.",
+            "data": {
+              "alarm_panel_entity": "Alarm panel (optional)",
+              "alarmo_enabled": "Trigger Alarmo on high-risk alerts",
+              "alarmo_trigger_score": "Alarmo trigger score"
+            },
+            "data_description": {
+              "alarm_panel_entity": "Your alarm_control_panel entity. Enables the 'armed' notify conditions and Alarmo triggering.",
+              "alarmo_enabled": "Only fires while the panel is already armed.",
+              "alarmo_trigger_score": "Score at or above which Alarmo is triggered."
+            }
+          },
+          "processing": {
+            "name": "Motion processing (house default)",
+            "description": "Skip AI analysis entirely unless presence, alarm state and time all allow it — saving cost and noise. Each camera can follow this or set its own. 'Analyze now' and the service always bypass it.",
+            "data": {
+              "process_presence": "Process based on presence",
+              "process_armed": "Process based on alarm state",
+              "process_time_mode": "Process based on time",
+              "process_time_start": "Window start",
+              "process_time_end": "Window end",
+              "sun_entity": "Sun entity for day/night"
+            },
+            "data_description": {
+              "process_presence": "e.g. only when nobody is home.",
+              "process_armed": "Needs an alarm panel set above.",
+              "process_time_mode": "Any time, a fixed window, or daytime/nighttime from your sun entity.",
+              "process_time_start": "Used when 'Between two times' is selected.",
+              "process_time_end": "Used when 'Between two times' is selected.",
+              "sun_entity": "Drives the daytime/nighttime option. Default sun.sun."
+            }
+          },
+          "ai": {
+            "name": "AI response style",
+            "description": "Optional personality for alert wording. Never changes the score or the factual fields.",
+            "data": {
+              "response_style": "Response style / personality"
+            },
+            "data_description": {
+              "response_style": "e.g. \"in the style of Samuel L. Jackson\"."
+            }
+          }
         }
       }
     }
@@ -72,34 +192,78 @@
       "step": {
         "user": {
           "title": "Add camera",
-          "description": "Any of the motion triggers turning on starts the AI analysis. The scene context is added to the AI prompt — describe what the camera sees, and say explicitly whether a gate is visible.",
+          "description": "Each camera becomes its own device with its own entities. Any of its motion triggers turning on starts the AI analysis.",
           "data": {
             "name": "Camera name",
             "camera_entity": "Camera stream entity",
-            "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service or the Analyze button)",
-            "scene_context": "Scene context for the AI (optional)",
-            "motion_policy": "Motion processing policy (follow the house settings, or set custom rules below)",
-            "process_presence": "Custom: process motion based on presence",
-            "process_armed": "Custom: process motion based on alarm state",
-            "process_time_mode": "Custom: process motion based on time",
-            "process_time_start": "Custom window start (used when 'Between two times' is selected)",
-            "process_time_end": "Custom window end (used when 'Between two times' is selected)"
+            "motion_entities": "Motion triggers",
+            "scene_context": "Scene context for the AI (optional)"
+          },
+          "data_description": {
+            "name": "A friendly label, e.g. \"Side Gate\".",
+            "camera_entity": "The camera.* entity that snapshots are taken from.",
+            "motion_entities": "Any of these turning on starts the analysis. Leave blank to trigger only via the Analyze button or the ai_camera_centre.analyze service. If a camera stops triggering after an update, re-select its trigger here — entity ids can change when the source integration changes.",
+            "scene_context": "Describe what the camera sees and say explicitly whether a gate is visible. Added to the AI prompt."
+          },
+          "sections": {
+            "processing": {
+              "name": "Motion processing",
+              "description": "By default this camera follows the house-wide motion-processing rules. Choose 'Custom for this camera' to override them here.",
+              "data": {
+                "motion_policy": "Processing policy",
+                "process_presence": "Custom: based on presence",
+                "process_armed": "Custom: based on alarm state",
+                "process_time_mode": "Custom: based on time",
+                "process_time_start": "Custom window start",
+                "process_time_end": "Custom window end"
+              },
+              "data_description": {
+                "motion_policy": "Follow the house settings, or set custom rules below.",
+                "process_presence": "Only used when the policy is 'Custom for this camera'.",
+                "process_armed": "Only used when the policy is 'Custom for this camera'.",
+                "process_time_mode": "Only used when the policy is 'Custom for this camera'.",
+                "process_time_start": "Used when 'Between two times' is selected.",
+                "process_time_end": "Used when 'Between two times' is selected."
+              }
+            }
           }
         },
         "reconfigure": {
           "title": "Edit camera",
-          "description": "Renaming keeps the camera's existing alert history. Any of the motion triggers turning on starts the AI analysis.",
+          "description": "Renaming keeps the camera's existing alert history. Any of its motion triggers turning on starts the AI analysis.",
           "data": {
             "name": "Camera name",
             "camera_entity": "Camera stream entity",
-            "motion_entities": "Motion triggers (optional — leave blank to trigger via the ai_camera_centre.analyze service or the Analyze button)",
-            "scene_context": "Scene context for the AI (optional)",
-            "motion_policy": "Motion processing policy (follow the house settings, or set custom rules below)",
-            "process_presence": "Custom: process motion based on presence",
-            "process_armed": "Custom: process motion based on alarm state",
-            "process_time_mode": "Custom: process motion based on time",
-            "process_time_start": "Custom window start (used when 'Between two times' is selected)",
-            "process_time_end": "Custom window end (used when 'Between two times' is selected)"
+            "motion_entities": "Motion triggers",
+            "scene_context": "Scene context for the AI (optional)"
+          },
+          "data_description": {
+            "name": "A friendly label, e.g. \"Side Gate\".",
+            "camera_entity": "The camera.* entity that snapshots are taken from.",
+            "motion_entities": "Any of these turning on starts the analysis. Leave blank to trigger only via the Analyze button or the ai_camera_centre.analyze service. If a camera stops triggering after an update, re-select its trigger here — entity ids can change when the source integration changes.",
+            "scene_context": "Describe what the camera sees and say explicitly whether a gate is visible. Added to the AI prompt."
+          },
+          "sections": {
+            "processing": {
+              "name": "Motion processing",
+              "description": "By default this camera follows the house-wide motion-processing rules. Choose 'Custom for this camera' to override them here.",
+              "data": {
+                "motion_policy": "Processing policy",
+                "process_presence": "Custom: based on presence",
+                "process_armed": "Custom: based on alarm state",
+                "process_time_mode": "Custom: based on time",
+                "process_time_start": "Custom window start",
+                "process_time_end": "Custom window end"
+              },
+              "data_description": {
+                "motion_policy": "Follow the house settings, or set custom rules below.",
+                "process_presence": "Only used when the policy is 'Custom for this camera'.",
+                "process_armed": "Only used when the policy is 'Custom for this camera'.",
+                "process_time_mode": "Only used when the policy is 'Custom for this camera'.",
+                "process_time_start": "Used when 'Between two times' is selected.",
+                "process_time_end": "Used when 'Between two times' is selected."
+              }
+            }
           }
         }
       },
@@ -117,24 +281,38 @@
       "step": {
         "user": {
           "title": "Add alert target",
-          "description": "An alert target is a notify service that receives camera alerts. Set the minimum suspicion score it should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
+          "description": "An alert target is a notify service that receives camera alerts. Set the minimum suspicion score it should be woken for, when it should be notified, and optionally which cameras it covers.",
           "data": {
-            "name": "Name (optional — a friendly label, e.g. \"Ben's phone\")",
+            "name": "Name (optional)",
             "service": "Notify service",
-            "min_score": "Minimum suspicion score to notify (1 = every alert)",
+            "min_score": "Minimum suspicion score to notify",
             "notify_condition": "When to notify this target",
-            "cameras": "Only alert for these cameras (blank = all)"
+            "cameras": "Only alert for these cameras"
+          },
+          "data_description": {
+            "name": "A friendly label, e.g. \"Ben's phone\". Derived from the service if left blank.",
+            "service": "The notify.* service that receives the alert.",
+            "min_score": "1 notifies on every alert; 6+ only for genuinely suspicious events.",
+            "notify_condition": "Always, or only when nobody's home / the alarm is armed / either. The armed options need an alarm panel set in Settings.",
+            "cameras": "Leave blank to cover all cameras."
           }
         },
         "reconfigure": {
           "title": "Edit alert target",
-          "description": "Set the minimum suspicion score this target should be woken for, when it should be notified (presence / alarm state), and optionally restrict it to specific cameras (none selected = all cameras).",
+          "description": "Set the minimum suspicion score this target should be woken for, when it should be notified, and optionally which cameras it covers.",
           "data": {
-            "name": "Name (optional — a friendly label, e.g. \"Ben's phone\")",
+            "name": "Name (optional)",
             "service": "Notify service",
-            "min_score": "Minimum suspicion score to notify (1 = every alert)",
+            "min_score": "Minimum suspicion score to notify",
             "notify_condition": "When to notify this target",
-            "cameras": "Only alert for these cameras (blank = all)"
+            "cameras": "Only alert for these cameras"
+          },
+          "data_description": {
+            "name": "A friendly label, e.g. \"Ben's phone\". Derived from the service if left blank.",
+            "service": "The notify.* service that receives the alert.",
+            "min_score": "1 notifies on every alert; 6+ only for genuinely suspicious events.",
+            "notify_condition": "Always, or only when nobody's home / the alarm is armed / either. The armed options need an alarm panel set in Settings.",
+            "cameras": "Leave blank to cover all cameras."
           }
         }
       },
@@ -151,18 +329,26 @@
       "step": {
         "user": {
           "title": "Add known visitor",
-          "description": "Describe a household member or regular so the AI can recognise them and treat them as low-risk. The description is added to every camera's prompt — include distinguishing features (build, typical clothing, whether they use a wheelchair, a pet, etc.).",
+          "description": "Describe a household member or regular so the AI recognises them and treats them as low-risk. The description is added to every camera's prompt.",
           "data": {
-            "name": "Name (e.g. Ben, the postman)",
+            "name": "Name",
             "description": "Description for the AI"
+          },
+          "data_description": {
+            "name": "e.g. Ben, or \"the postman\".",
+            "description": "Include distinguishing features — build, typical clothing, whether they use a wheelchair, a pet, etc."
           }
         },
         "reconfigure": {
           "title": "Edit known visitor",
-          "description": "The description is added to every camera's prompt — include distinguishing features (build, typical clothing, a pet, etc.).",
+          "description": "The description is added to every camera's prompt.",
           "data": {
-            "name": "Name (e.g. Ben, the postman)",
+            "name": "Name",
             "description": "Description for the AI"
+          },
+          "data_description": {
+            "name": "e.g. Ben, or \"the postman\".",
+            "description": "Include distinguishing features — build, typical clothing, a pet, etc."
           }
         }
       },
