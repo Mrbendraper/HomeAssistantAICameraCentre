@@ -36,9 +36,12 @@
   clip-length setting (recording adds load/storage). Needs live testing.
 - **Live card updates** — push new alerts to the Lovelace card over a
   websocket subscription instead of the current 5-minute poll.
-- **Tests** — pytest-homeassistant-custom-component coverage for the store,
-  pipeline (mocked `ai_task`), and config/subentry flows. Would catch the
-  import/logic errors that currently only surface on a live HA.
+- **Tests** — _initial suite landed_: `tests/` covers the store, the
+  motion-ignore processing gate, the config/options flows, and the
+  known-photo upload endpoint + websocket commands, run in CI on every push
+  (`validate.yml` pytest job, Python 3.13). Still to expand: the full
+  analyze pipeline with a mocked `ai_task`, and the camera/visitor subentry
+  flows.
 - **Translations** — strings are translation-ready; add other languages
   once the text stabilises.
 - **Signed image URLs** — replace the capability-URL scheme (random
