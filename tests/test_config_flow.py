@@ -28,7 +28,34 @@ from custom_components.ai_camera_centre.const import (
     DOMAIN,
 )
 
-MINIMAL_SETTINGS = {
+# The form now groups fields into UI sections, so a submission is nested by
+# section key. The flow flattens this back to flat option keys on submit.
+FORM_INPUT = {
+    "capture": {
+        "snapshot_count": 5,
+        "snapshot_interval_ms": 500,
+        "cooldown_seconds": 30,
+    },
+    "alerts": {
+        "min_log_score": 1,
+        "retention_days": 7,
+        "repeat_context_minutes": 15,
+        "dashboard_path": "/lovelace/alerts",
+    },
+    "alarm": {
+        "alarmo_enabled": False,
+        "alarmo_trigger_score": 9,
+    },
+    "processing": {
+        "process_presence": DEFAULT_PROCESS_PRESENCE,
+        "process_armed": "always",
+        "process_time_mode": "always",
+    },
+    "ai": {},
+}
+
+# What those settings look like once flattened and stored in entry.options.
+STORED_OPTIONS = {
     "retention_days": 7,
     "snapshot_count": 5,
     "snapshot_interval_ms": 500,
@@ -38,8 +65,6 @@ MINIMAL_SETTINGS = {
     "repeat_context_minutes": 15,
     "alarmo_enabled": False,
     "alarmo_trigger_score": 9,
-    # gate selects carry their own defaults via the schema, but supply them
-    # explicitly here since we bypass the form rendering:
     "process_presence": DEFAULT_PROCESS_PRESENCE,
     "process_armed": "always",
     "process_time_mode": "always",
@@ -56,7 +81,7 @@ async def test_user_flow_creates_entry(hass: HomeAssistant):
     with patch(SETUP_ENTRY, return_value=True):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {**MINIMAL_SETTINGS, CONF_RESPONSE_STYLE: "like a noir detective"},
+            {**FORM_INPUT, "ai": {CONF_RESPONSE_STYLE: "like a noir detective"}},
         )
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     opts = result["options"]
@@ -66,7 +91,7 @@ async def test_user_flow_creates_entry(hass: HomeAssistant):
 
 
 async def test_single_instance_only(hass: HomeAssistant):
-    MockConfigEntry(domain=DOMAIN, data={}, options=MINIMAL_SETTINGS).add_to_hass(hass)
+    MockConfigEntry(domain=DOMAIN, data={}, options=STORED_OPTIONS).add_to_hass(hass)
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -78,7 +103,7 @@ async def test_options_flow_clears_blanked_style(hass: HomeAssistant):
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={},
-        options={**MINIMAL_SETTINGS, CONF_RESPONSE_STYLE: "old style"},
+        options={**STORED_OPTIONS, CONF_RESPONSE_STYLE: "old style"},
     )
     entry.add_to_hass(hass)
     _stub_deps(hass)
@@ -88,7 +113,7 @@ async def test_options_flow_clears_blanked_style(hass: HomeAssistant):
     # resubmit without a style -> it should be cleared from options
     with patch(SETUP_ENTRY, return_value=True):
         result = await hass.config_entries.options.async_configure(
-            result["flow_id"], MINIMAL_SETTINGS
+            result["flow_id"], FORM_INPUT
         )
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert CONF_RESPONSE_STYLE not in result["data"]

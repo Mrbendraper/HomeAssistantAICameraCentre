@@ -57,6 +57,7 @@ from .const import (
     CONF_ALARM_PANEL_ENTITY,
     CONF_CAMERA_ENTITY,
     CONF_CAMERA_ID,
+    CONF_CAMERA_NAME,
     CONF_MOTION_ENTITIES,
     CONF_RETENTION_DAYS,
     CONF_VISITOR_DESCRIPTION,
@@ -661,6 +662,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # predating the id get a computed fallback) matching the photo dir keys.
     known_visitors = _known_visitors(entry)
 
+    ent_reg = er.async_get(hass)
     pipelines: dict[str, CameraPipeline] = {}
     for sub in entry.subentries.values():
         if sub.subentry_type != SUBENTRY_CAMERA:
@@ -679,6 +681,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pipelines[camera_id] = pipeline
         motion_entities = camera_conf.get(CONF_MOTION_ENTITIES) or []
         if motion_entities:
+            _warn_unknown_motion_entities(
+                hass,
+                ent_reg,
+                camera_conf.get(CONF_CAMERA_NAME) or camera_id,
+                motion_entities,
+            )
             entry.async_on_unload(
                 async_track_state_change_event(
                     hass, motion_entities, pipeline.handle_motion_event
@@ -743,6 +751,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _inherit_camera_areas(hass, entry)
     hass.async_create_task(_async_register_lovelace_resource(hass))
     return True
+
+
+@callback
+def _warn_unknown_motion_entities(
+    hass: HomeAssistant,
+    ent_reg: er.EntityRegistry,
+    camera_label: str,
+    motion_entities: list[str],
+) -> None:
+    """Warn about configured motion triggers that don't exist.
+
+    A camera silently stops triggering when a configured motion entity id no
+    longer resolves — e.g. the source integration renamed it, the device was
+    re-added, or it was mistyped. ``async_track_state_change_event`` matches on
+    the exact id and never fires for a missing one, so without this the failure
+    is invisible: the source integration shows motion, but our pipeline never
+    runs. We check both the live state machine and the (persistent) entity
+    registry so a source integration that simply hasn't finished loading yet
+    isn't falsely reported as missing.
+    """
+    missing = [
+        entity_id
+        for entity_id in motion_entities
+        if hass.states.get(entity_id) is None
+        and ent_reg.async_get(entity_id) is None
+    ]
+    if missing:
+        _LOGGER.warning(
+            "Camera '%s': motion trigger %s not found in Home Assistant — "
+            "motion from this camera will be ignored until the entity id is "
+            "corrected in the camera's settings. Trigger entity ids can change "
+            "when the source integration is updated or the device is renamed.",
+            camera_label,
+            ", ".join(missing),
+        )
 
 
 def _source_area_id(

@@ -20,6 +20,7 @@ from homeassistant.config_entries import (
     SubentryFlowResult,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
@@ -108,6 +109,41 @@ from .const import (
 )
 
 MOTION_DOMAINS = ["binary_sensor", "input_boolean", "switch"]
+
+# -- form sections -------------------------------------------------------
+# The forms group their fields into collapsible UI sections. Sections nest
+# their fields under the section key in the returned user_input; we flatten
+# that back to the flat option/subentry keys the rest of the integration
+# reads, so the storage shape is unchanged.
+SECTION_CAPTURE = "capture"
+SECTION_ALERTS = "alerts"
+SECTION_ALARM = "alarm"
+SECTION_PROCESSING = "processing"
+SECTION_AI = "ai"
+SETTINGS_SECTIONS = (
+    SECTION_CAPTURE,
+    SECTION_ALERTS,
+    SECTION_ALARM,
+    SECTION_PROCESSING,
+    SECTION_AI,
+)
+CAMERA_SECTIONS = (SECTION_PROCESSING,)
+
+
+def _flatten_sections(
+    user_input: dict[str, Any], section_keys: tuple[str, ...]
+) -> dict[str, Any]:
+    """Merge sectioned form output back into a flat dict.
+
+    Idempotent: input that is already flat (no section keys present) is
+    returned unchanged, so callers and tests can pass either shape.
+    """
+    flat = {k: v for k, v in user_input.items() if k not in section_keys}
+    for key in section_keys:
+        value = user_input.get(key)
+        if isinstance(value, dict):
+            flat.update(value)
+    return flat
 
 INT_SETTINGS = (
     CONF_RETENTION_DAYS,
@@ -211,104 +247,158 @@ def _gate_fields(src: dict[str, Any]) -> dict[Any, Any]:
 
 
 def _settings_schema(options: dict[str, Any]) -> vol.Schema:
-    """Global settings form, prefilled from current options."""
+    """Global settings form, grouped into collapsible sections.
+
+    Prefilled from current options. Fields are grouped by purpose; on submit
+    the sectioned output is flattened back to the flat option keys via
+    ``_flatten_sections``.
+    """
 
     def _get(key: str, default: Any) -> Any:
         return options.get(key, default)
 
+    capture = {
+        vol.Required(
+            CONF_SNAPSHOT_COUNT,
+            default=_get(CONF_SNAPSHOT_COUNT, DEFAULT_SNAPSHOT_COUNT),
+        ): NumberSelector(
+            NumberSelectorConfig(min=2, max=10, mode=NumberSelectorMode.BOX)
+        ),
+        vol.Required(
+            CONF_SNAPSHOT_INTERVAL_MS,
+            default=_get(CONF_SNAPSHOT_INTERVAL_MS, DEFAULT_SNAPSHOT_INTERVAL_MS),
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=100, max=5000, step=100, mode=NumberSelectorMode.BOX
+            )
+        ),
+        vol.Required(
+            CONF_COOLDOWN_SECONDS,
+            default=_get(CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS),
+        ): NumberSelector(
+            NumberSelectorConfig(min=0, max=3600, mode=NumberSelectorMode.BOX)
+        ),
+        vol.Optional(
+            CONF_AI_TASK_ENTITY,
+            description={"suggested_value": _get(CONF_AI_TASK_ENTITY, None)},
+        ): EntitySelector(EntitySelectorConfig(domain="ai_task")),
+    }
+
+    alerts = {
+        vol.Required(
+            CONF_MIN_LOG_SCORE,
+            default=_get(CONF_MIN_LOG_SCORE, DEFAULT_MIN_LOG_SCORE),
+        ): NumberSelector(
+            NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+        ),
+        vol.Required(
+            CONF_RETENTION_DAYS,
+            default=_get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS),
+        ): NumberSelector(
+            NumberSelectorConfig(min=1, max=90, mode=NumberSelectorMode.BOX)
+        ),
+        vol.Required(
+            CONF_REPEAT_CONTEXT_MINUTES,
+            default=_get(
+                CONF_REPEAT_CONTEXT_MINUTES, DEFAULT_REPEAT_CONTEXT_MINUTES
+            ),
+        ): NumberSelector(
+            NumberSelectorConfig(min=0, max=120, mode=NumberSelectorMode.BOX)
+        ),
+        vol.Optional(
+            CONF_LOG_WINDOW_START,
+            description={"suggested_value": _get(CONF_LOG_WINDOW_START, None)},
+        ): TimeSelector(),
+        vol.Optional(
+            CONF_LOG_WINDOW_END,
+            description={"suggested_value": _get(CONF_LOG_WINDOW_END, None)},
+        ): TimeSelector(),
+        vol.Required(
+            CONF_DASHBOARD_PATH,
+            default=_get(CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH),
+        ): TextSelector(),
+    }
+
+    alarm = {
+        vol.Optional(
+            CONF_ALARM_PANEL_ENTITY,
+            description={"suggested_value": _get(CONF_ALARM_PANEL_ENTITY, None)},
+        ): EntitySelector(EntitySelectorConfig(domain="alarm_control_panel")),
+        vol.Required(
+            CONF_ALARMO_ENABLED,
+            default=_get(CONF_ALARMO_ENABLED, False),
+        ): BooleanSelector(),
+        vol.Required(
+            CONF_ALARMO_TRIGGER_SCORE,
+            default=_get(CONF_ALARMO_TRIGGER_SCORE, DEFAULT_ALARMO_TRIGGER_SCORE),
+        ): NumberSelector(
+            NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+        ),
+    }
+
+    processing = {
+        # -- motion-ignore processing gate (house defaults) --------------
+        **_gate_fields(options),
+        vol.Optional(
+            CONF_SUN_ENTITY,
+            description={
+                "suggested_value": _get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY)
+            },
+        ): EntitySelector(EntitySelectorConfig(domain="sun")),
+    }
+
+    ai = {
+        vol.Optional(
+            CONF_RESPONSE_STYLE,
+            description={"suggested_value": _get(CONF_RESPONSE_STYLE, None)},
+        ): TextSelector(TextSelectorConfig(multiline=True)),
+    }
+
     return vol.Schema(
         {
-            vol.Required(
-                CONF_RETENTION_DAYS,
-                default=_get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS),
-            ): NumberSelector(
-                NumberSelectorConfig(min=1, max=90, mode=NumberSelectorMode.BOX)
+            vol.Required(SECTION_CAPTURE): section(
+                vol.Schema(capture), {"collapsed": False}
             ),
-            vol.Required(
-                CONF_SNAPSHOT_COUNT,
-                default=_get(CONF_SNAPSHOT_COUNT, DEFAULT_SNAPSHOT_COUNT),
-            ): NumberSelector(
-                NumberSelectorConfig(min=2, max=10, mode=NumberSelectorMode.BOX)
+            vol.Required(SECTION_ALERTS): section(
+                vol.Schema(alerts), {"collapsed": False}
             ),
-            vol.Required(
-                CONF_SNAPSHOT_INTERVAL_MS,
-                default=_get(CONF_SNAPSHOT_INTERVAL_MS, DEFAULT_SNAPSHOT_INTERVAL_MS),
-            ): NumberSelector(
-                NumberSelectorConfig(
-                    min=100, max=5000, step=100, mode=NumberSelectorMode.BOX
-                )
+            vol.Required(SECTION_ALARM): section(
+                vol.Schema(alarm), {"collapsed": True}
             ),
-            vol.Required(
-                CONF_COOLDOWN_SECONDS,
-                default=_get(CONF_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS),
-            ): NumberSelector(
-                NumberSelectorConfig(min=0, max=3600, mode=NumberSelectorMode.BOX)
+            vol.Required(SECTION_PROCESSING): section(
+                vol.Schema(processing), {"collapsed": True}
             ),
-            vol.Required(
-                CONF_DASHBOARD_PATH,
-                default=_get(CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH),
-            ): TextSelector(),
-            vol.Optional(
-                CONF_AI_TASK_ENTITY,
-                description={"suggested_value": _get(CONF_AI_TASK_ENTITY, None)},
-            ): EntitySelector(EntitySelectorConfig(domain="ai_task")),
-            vol.Optional(
-                CONF_ALARM_PANEL_ENTITY,
-                description={"suggested_value": _get(CONF_ALARM_PANEL_ENTITY, None)},
-            ): EntitySelector(EntitySelectorConfig(domain="alarm_control_panel")),
-            vol.Required(
-                CONF_MIN_LOG_SCORE,
-                default=_get(CONF_MIN_LOG_SCORE, DEFAULT_MIN_LOG_SCORE),
-            ): NumberSelector(
-                NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
+            vol.Required(SECTION_AI): section(
+                vol.Schema(ai), {"collapsed": True}
             ),
-            vol.Required(
-                CONF_REPEAT_CONTEXT_MINUTES,
-                default=_get(
-                    CONF_REPEAT_CONTEXT_MINUTES, DEFAULT_REPEAT_CONTEXT_MINUTES
-                ),
-            ): NumberSelector(
-                NumberSelectorConfig(min=0, max=120, mode=NumberSelectorMode.BOX)
-            ),
-            vol.Optional(
-                CONF_LOG_WINDOW_START,
-                description={"suggested_value": _get(CONF_LOG_WINDOW_START, None)},
-            ): TimeSelector(),
-            vol.Optional(
-                CONF_LOG_WINDOW_END,
-                description={"suggested_value": _get(CONF_LOG_WINDOW_END, None)},
-            ): TimeSelector(),
-            vol.Required(
-                CONF_ALARMO_ENABLED,
-                default=_get(CONF_ALARMO_ENABLED, False),
-            ): BooleanSelector(),
-            vol.Required(
-                CONF_ALARMO_TRIGGER_SCORE,
-                default=_get(CONF_ALARMO_TRIGGER_SCORE, DEFAULT_ALARMO_TRIGGER_SCORE),
-            ): NumberSelector(
-                NumberSelectorConfig(min=1, max=10, mode=NumberSelectorMode.SLIDER)
-            ),
-            # -- motion-ignore processing gate (house defaults) ----------
-            **_gate_fields(options),
-            vol.Optional(
-                CONF_SUN_ENTITY,
-                description={
-                    "suggested_value": _get(CONF_SUN_ENTITY, DEFAULT_SUN_ENTITY)
-                },
-            ): EntitySelector(EntitySelectorConfig(domain="sun")),
-            # -- AI personality / response style -------------------------
-            vol.Optional(
-                CONF_RESPONSE_STYLE,
-                description={"suggested_value": _get(CONF_RESPONSE_STYLE, None)},
-            ): TextSelector(TextSelectorConfig(multiline=True)),
         }
     )
 
 
 def _camera_schema(camera: dict[str, Any] | None = None) -> vol.Schema:
-    """Add/edit camera form, prefilled when editing."""
+    """Add/edit camera form, prefilled when editing.
+
+    The essentials (name, stream, motion triggers, scene context) sit at the
+    top; the motion-processing policy and its custom gate live in a collapsed
+    section, since most cameras just follow the house default.
+    """
     camera = camera or {}
     motion_entities = camera.get(CONF_MOTION_ENTITIES) or []
+    processing = {
+        # Processing policy: follow the house gate, or override it here.
+        # The gate fields only apply when "Custom for this camera" is selected.
+        vol.Required(
+            CONF_CAMERA_MOTION_POLICY,
+            default=camera.get(
+                CONF_CAMERA_MOTION_POLICY, DEFAULT_CAMERA_MOTION_POLICY
+            ),
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=POLICY_OPTIONS, mode=SelectSelectorMode.DROPDOWN
+            )
+        ),
+        **_gate_fields(camera),
+    }
     return vol.Schema(
         {
             vol.Required(
@@ -329,19 +419,9 @@ def _camera_schema(camera: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_SCENE_CONTEXT,
                 description={"suggested_value": camera.get(CONF_SCENE_CONTEXT, "")},
             ): TextSelector(TextSelectorConfig(multiline=True)),
-            # Processing policy: follow the house gate, or override it here.
-            # The gate fields below only apply when "Custom" is selected.
-            vol.Required(
-                CONF_CAMERA_MOTION_POLICY,
-                default=camera.get(
-                    CONF_CAMERA_MOTION_POLICY, DEFAULT_CAMERA_MOTION_POLICY
-                ),
-            ): SelectSelector(
-                SelectSelectorConfig(
-                    options=POLICY_OPTIONS, mode=SelectSelectorMode.DROPDOWN
-                )
+            vol.Required(SECTION_PROCESSING): section(
+                vol.Schema(processing), {"collapsed": True}
             ),
-            **_gate_fields(camera),
         }
     )
 
@@ -520,10 +600,11 @@ class AICameraCentreConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
         if user_input is not None:
+            settings = _flatten_sections(user_input, SETTINGS_SECTIONS)
             return self.async_create_entry(
                 title="AI Camera Centre",
                 data={},
-                options=_clean_settings(user_input),
+                options=_clean_settings(settings),
             )
         return self.async_show_form(
             step_id="user", data_schema=_settings_schema({})
@@ -553,10 +634,11 @@ class AICameraCentreOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
+            settings = _flatten_sections(user_input, SETTINGS_SECTIONS)
             options = dict(self.config_entry.options)
-            options.update(_clean_settings(user_input))
+            options.update(_clean_settings(settings))
             for key in OPTIONAL_SETTINGS:
-                if key not in user_input:
+                if key not in settings:
                     options.pop(key, None)
             return self.async_create_entry(data=options)
         return self.async_show_form(
@@ -580,6 +662,7 @@ class CameraSubentryFlow(ConfigSubentryFlow):
     ) -> SubentryFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten_sections(user_input, CAMERA_SECTIONS)
             camera_id = slugify(user_input[CONF_CAMERA_NAME])
             if not camera_id:
                 errors[CONF_CAMERA_NAME] = "invalid_name"
@@ -600,6 +683,7 @@ class CameraSubentryFlow(ConfigSubentryFlow):
     ) -> SubentryFlowResult:
         subentry = self._get_reconfigure_subentry()
         if user_input is not None:
+            user_input = _flatten_sections(user_input, CAMERA_SECTIONS)
             # Keep the original camera_id (and its alert history) on rename.
             camera_id = subentry.data.get(CONF_CAMERA_ID) or subentry.subentry_id
             return self.async_update_and_abort(

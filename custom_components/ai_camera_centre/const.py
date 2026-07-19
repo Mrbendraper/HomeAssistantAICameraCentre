@@ -1,7 +1,7 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.7.0"
+VERSION = "2.8.0"
 
 # subentry types
 SUBENTRY_CAMERA = "camera"

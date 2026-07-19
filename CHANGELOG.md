@@ -3,6 +3,33 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.8.0]
+
+### Added
+- **Warning when a motion trigger entity is missing** — on setup the
+  integration now checks each camera's configured motion-trigger entity ids
+  against Home Assistant and logs a clear warning naming any that don't exist
+  (checking both the live state machine and the entity registry, so a
+  source integration that is merely slow to load isn't misreported). A stale
+  or renamed trigger id — e.g. after the source camera integration is updated
+  or a device is renamed — no longer fails silently: previously the source
+  integration would show motion while this integration never ran, with nothing
+  in the log to explain it.
+
+### Changed
+- **Grouped, better-labelled settings UI** — the global settings form and the
+  per-camera form are now organised into collapsible sections with headings,
+  section descriptions and per-field help text:
+  - Global settings: *Capture & analysis*, *Alerts & history*,
+    *Alarm & Alarmo*, *Motion processing (house default)* and
+    *AI response style*.
+  - Camera form: the essentials (name, stream, motion triggers, scene context)
+    stay up top, with the motion-processing policy and its custom gate moved
+    into a collapsed *Motion processing* section.
+  - Alert-target and known-visitor forms gained clearer field titles and help
+    text. No settings changed meaning and nothing needs reconfiguring — stored
+    options and camera data keep the same flat shape.
+
 ## [2.7.0]
 
 ### Added
