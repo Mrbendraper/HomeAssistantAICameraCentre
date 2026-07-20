@@ -3,6 +3,23 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.8.3]
+
+### Fixed
+- **The bundled card was pinned to the version you first installed.** The
+  Lovelace resource is registered as
+  `/ai_camera_centre/ai-camera-centre-card.js?v=<version>`, where the query is
+  the cache-buster for a file served with long-lived cache headers. Auto-
+  registration only ran when no resource existed yet: on every later upgrade it
+  found the URL, ignored the query and returned, so dashboards kept requesting
+  the *original* `?v=` and browsers kept serving that cached JS forever. Anyone
+  who installed before 2.6.0 therefore never received the **AI Camera Centre
+  People** card — it was missing from the card picker, and adding it by hand
+  failed because the element was never defined. The resource URL is now updated
+  to the running version on upgrade, busting the cache.
+  - If you hit this, the fix applies on the next restart; a browser hard-refresh
+    (or *Reset frontend cache* in the companion app) may still be needed once.
+
 ## [2.8.2]
 
 ### Added

@@ -600,11 +600,32 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
             raise RuntimeError("Lovelace resource collection unavailable")
         if hasattr(resources, "loaded") and not resources.loaded:
             await resources.async_load()
+        current = f"{CARD_URL}?v={VERSION}"
         for item in resources.async_items():
-            if str(item.get("url", "")).split("?")[0] == CARD_URL:
+            url = str(item.get("url", ""))
+            if url.split("?")[0] != CARD_URL:
+                continue
+            if url == current:
                 return
+            # The card is served with long-lived cache headers, so the ?v=
+            # query is the only thing busting that cache. Leaving a stale
+            # version here pins browsers to the JS from whichever release
+            # first registered the resource — cards added in later versions
+            # then never appear, and the old file is served indefinitely.
+            item_id = item.get("id")
+            if item_id is None:
+                return
+            await resources.async_update_item(item_id, {"url": current})
+            _LOGGER.info(
+                "Updated Lovelace resource %s to version %s "
+                "(was %s) — a browser refresh may be needed",
+                CARD_URL,
+                VERSION,
+                url,
+            )
+            return
         await resources.async_create_item(
-            {"res_type": "module", "url": f"{CARD_URL}?v={VERSION}"}
+            {"res_type": "module", "url": current}
         )
         _LOGGER.info("Registered Lovelace resource %s", CARD_URL)
     except Exception:  # noqa: BLE001 - YAML-mode dashboards, API changes
