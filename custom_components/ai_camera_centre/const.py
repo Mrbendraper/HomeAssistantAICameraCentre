@@ -1,7 +1,7 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.9.0"
+VERSION = "2.10.0"
 
 # subentry types
 SUBENTRY_CAMERA = "camera"
@@ -26,6 +26,10 @@ CONF_ALARMO_TRIGGER_SCORE = "alarmo_trigger_score"
 CONF_MIN_LOG_SCORE = "min_log_score"
 CONF_LOG_WINDOW_START = "log_window_start"
 CONF_LOG_WINDOW_END = "log_window_end"
+# record every analysis outcome (incl. sub-threshold + failures) to the
+# Home Assistant logbook, so a working-but-quiet camera is visible there
+CONF_LOG_ACTIVITY = "log_activity"
+DEFAULT_LOG_ACTIVITY = True
 # repeat-visitor context
 CONF_REPEAT_CONTEXT_MINUTES = "repeat_context_minutes"
 # AI personality / response-style override (global, wording only)

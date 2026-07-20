@@ -51,6 +51,7 @@ from .const import (
     CONF_CAMERA_NAME,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
+    CONF_LOG_ACTIVITY,
     CONF_LOG_WINDOW_END,
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
@@ -79,6 +80,7 @@ from .const import (
     DEFAULT_CAMERA_MOTION_POLICY,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
+    DEFAULT_LOG_ACTIVITY,
     DEFAULT_MIN_LOG_SCORE,
     DEFAULT_PROCESS_ARMED,
     DEFAULT_PROCESS_PRESENCE,
@@ -317,6 +319,10 @@ def _settings_schema(options: dict[str, Any]) -> vol.Schema:
             CONF_DASHBOARD_PATH,
             default=_get(CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH),
         ): TextSelector(),
+        vol.Required(
+            CONF_LOG_ACTIVITY,
+            default=_get(CONF_LOG_ACTIVITY, DEFAULT_LOG_ACTIVITY),
+        ): BooleanSelector(),
     }
 
     alarm = {

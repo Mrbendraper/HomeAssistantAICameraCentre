@@ -3,6 +3,21 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.10.0]
+
+### Added
+- **Analysis activity in the logbook.** Only *archived* alerts appeared
+  anywhere in the UI, so a camera that was triggering and analysing normally
+  but scoring below the log threshold looked completely dead — the
+  trigger → analysis → "below threshold, not logged" trace lived only in the
+  debug log. Each analysis outcome is now written to the camera device's
+  Home Assistant **logbook** (its Activity timeline): sub-threshold results
+  ("Analysed (score 1) — below the log threshold (min 2), not logged"),
+  "no significant motion", logged alerts, and **failures** ("Analysis failed:
+  …"), so an outage or a flaky AI provider is visible instead of silent. A new
+  **Record analyses to the logbook** toggle (Alerts & history, on by default)
+  turns it off for anyone who finds it noisy.
+
 ## [2.9.0]
 
 ### Added

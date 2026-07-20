@@ -347,6 +347,19 @@ column. Renaming each camera device (Settings → Devices → rename, and accept
 the entity-rename prompt) turns `reolink_trackmix_poe_person_3` into
 `front_garden_person` and makes this mistake much harder.
 
+**A camera is triggering but nothing appears in its history** — this is
+usually working as intended: the timeline card and alert history only show
+*archived* alerts, and an alert is archived only if its score is at or above
+**Minimum score to log** (and within the log time window, if set). A camera
+seeing only low-suspicion motion analyses every event but archives none. Since
+2.10.0 you can see those sub-threshold analyses (and any failures) in the
+camera **device's Logbook / Activity** timeline — "Analysed (score 1) — below
+the log threshold, not logged" — with a **Record analyses to the logbook**
+toggle in *Alerts & history* to turn it off. If you *expected* higher scores,
+check Settings → System → Logs for `ai_camera_centre`: a failing AI provider
+(e.g. a Google Generative AI `503`) is scored as low/benign, so a provider
+outage looks like a run of quiet events.
+
 **A camera doesn't react to motion** — turn on debug logging and trigger it;
 every step of the trigger path reports what it did:
 

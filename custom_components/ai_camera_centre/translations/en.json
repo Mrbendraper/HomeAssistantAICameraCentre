@@ -30,7 +30,8 @@
               "repeat_context_minutes": "Recent-activity window (minutes)",
               "log_window_start": "Only log after (optional)",
               "log_window_end": "Only log before (optional)",
-              "dashboard_path": "Dashboard opened by notifications"
+              "dashboard_path": "Dashboard opened by notifications",
+              "log_activity": "Record analyses to the logbook"
             },
             "data_description": {
               "min_log_score": "Only archive alerts at or above this suspicion score (1 logs every real alert). Filtered-out alerts can still notify.",
@@ -38,7 +39,8 @@
               "repeat_context_minutes": "Feeds a camera's recent alerts back to the AI so it can spot the same person returning or loitering. 0 disables it.",
               "log_window_start": "Leave both times blank to log at any hour.",
               "log_window_end": "Alerts outside the window are not archived, but can still notify.",
-              "dashboard_path": "The path a tapped notification opens, e.g. /lovelace/alerts."
+              "dashboard_path": "The path a tapped notification opens, e.g. /lovelace/alerts.",
+              "log_activity": "Add a line to each camera's Activity/logbook for every analysis — including ones scored below the log threshold and failures — so a working-but-quiet camera is visible. Turn off if you find it noisy."
             }
           },
           "alarm": {
@@ -123,7 +125,8 @@
               "repeat_context_minutes": "Recent-activity window (minutes)",
               "log_window_start": "Only log after (optional)",
               "log_window_end": "Only log before (optional)",
-              "dashboard_path": "Dashboard opened by notifications"
+              "dashboard_path": "Dashboard opened by notifications",
+              "log_activity": "Record analyses to the logbook"
             },
             "data_description": {
               "min_log_score": "Only archive alerts at or above this suspicion score (1 logs every real alert). Filtered-out alerts can still notify.",
@@ -131,7 +134,8 @@
               "repeat_context_minutes": "Feeds a camera's recent alerts back to the AI so it can spot the same person returning or loitering. 0 disables it.",
               "log_window_start": "Leave both times blank to log at any hour.",
               "log_window_end": "Alerts outside the window are not archived, but can still notify.",
-              "dashboard_path": "The path a tapped notification opens, e.g. /lovelace/alerts."
+              "dashboard_path": "The path a tapped notification opens, e.g. /lovelace/alerts.",
+              "log_activity": "Add a line to each camera's Activity/logbook for every analysis — including ones scored below the log threshold and failures — so a working-but-quiet camera is visible. Turn off if you find it noisy."
             }
           },
           "alarm": {

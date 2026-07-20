@@ -22,6 +22,7 @@ from homeassistant.components import camera
 from homeassistant.components.http.auth import async_sign_path
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
@@ -38,6 +39,7 @@ from .const import (
     CONF_CAMERA_NAME,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
+    CONF_LOG_ACTIVITY,
     CONF_LOG_WINDOW_END,
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_CAMERA_MOTION_POLICY,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
+    DEFAULT_LOG_ACTIVITY,
     DEFAULT_MIN_LOG_SCORE,
     DEFAULT_PROCESS_ARMED,
     DEFAULT_PROCESS_PRESENCE,
@@ -295,6 +298,9 @@ class CameraPipeline:
         )
         self.log_window_start = global_options.get(CONF_LOG_WINDOW_START)
         self.log_window_end = global_options.get(CONF_LOG_WINDOW_END)
+        self.log_activity = bool(
+            global_options.get(CONF_LOG_ACTIVITY, DEFAULT_LOG_ACTIVITY)
+        )
         # context injected into the prompt
         self.known_visitors = known_visitors or []
         self.repeat_context_minutes = int(
@@ -394,8 +400,33 @@ class CameraPipeline:
             self._last_run = time.monotonic()
             try:
                 await self._run(force=force)
-            except Exception:  # noqa: BLE001 - never break the listener
+            except Exception as err:  # noqa: BLE001 - never break the listener
                 _LOGGER.exception("%s: camera analysis failed", self.camera_id)
+                self._record_activity(f"Analysis failed: {err}")
+
+    @callback
+    def _record_activity(self, message: str) -> None:
+        """Write one analysis-outcome line to the Home Assistant logbook.
+
+        Sub-threshold and failed analyses never reach the alert history, so
+        without this a working-but-quiet camera looks dead in its Activity
+        timeline. Attaching the entry to the camera's recent-alert entity
+        places it in that device's logbook, alongside its switch/button events.
+        """
+        if not self.log_activity:
+            return
+        try:
+            from homeassistant.components.logbook import (  # noqa: PLC0415
+                async_log_entry,
+            )
+        except ImportError:  # logbook component unavailable
+            return
+        entity_id = er.async_get(self.hass).async_get_entity_id(
+            "binary_sensor", DOMAIN, f"{self.camera_id}_recent_alert"
+        )
+        if entity_id is None:
+            return
+        async_log_entry(self.hass, self.label, message, DOMAIN, entity_id)
 
     # -- pipeline steps ---------------------------------------------------
 
@@ -404,6 +435,7 @@ class CameraPipeline:
         report = await self._analyze_frames(paths)
         if NO_MOTION_MARKER in report["short"].lower():
             _LOGGER.debug("%s: AI saw no significant motion", self.camera_id)
+            self._record_activity("Analysed — no significant motion")
             return
         mid_path = paths[len(paths) // 2]
 
@@ -423,11 +455,23 @@ class CameraPipeline:
             async_dispatcher_send(self.hass, SIGNAL_NEW_ALERT, record)
             image_url = record["image"]
             logged = True
+            self._record_activity(
+                f"Logged alert (score {report['score']}): "
+                f"{report['short'] or 'motion detected'}"
+            )
         else:
             _LOGGER.debug(
                 "%s: alert (score %s) not archived (logging rules)",
                 self.camera_id,
                 report["score"],
+            )
+            reason = (
+                f"below the log threshold (min {self.min_log_score})"
+                if report["score"] < self.min_log_score
+                else "outside the log time window"
+            )
+            self._record_activity(
+                f"Analysed (score {report['score']}) — {reason}, not logged"
             )
             image_url = f"{SNAPSHOTS_URL}/{os.path.basename(mid_path)}"
             logged = False
