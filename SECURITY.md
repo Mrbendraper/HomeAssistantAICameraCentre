@@ -60,6 +60,19 @@ What this integration touches, and the choices behind it:
   `ai_camera_centre/subscribe` websocket commands) and all services require
   Home Assistant **authentication**. Any authenticated user can view alert
   history and call `analyze`/`log_alert`.
+- **Managing known people requires an admin.** Uploading a reference photo
+  (`POST /api/ai_camera_centre/known_photo`), adding a visitor
+  (`ai_camera_centre/add_visitor`) and deleting a visitor's photo
+  (`ai_camera_centre/delete_visitor_photo`) all require authentication **and
+  admin privileges** — a non-admin is rejected. Uploads are additionally
+  hardened: the declared size is capped (8 MB, checked before and after
+  reading), the part must declare an `image/*` content type, the target must
+  be an existing visitor (no arbitrary directory creation — the `visitor_id`
+  is slug-validated), and the bytes are re-encoded through Pillow to a bounded
+  JPEG. That re-encode both proves the upload is a real image and **strips all
+  metadata (including any EXIF GPS)** before it is stored or sent to the AI
+  provider. Stored photo/visitor-photo filenames are basename-scoped and must
+  end in `.jpg`, so a crafted `filename` cannot escape the visitor directory.
 - `log_alert`'s `image_path` is restricted to the integration's own storage
   directory or paths in `allowlist_external_dirs` — arbitrary files on the
   host cannot be published.
