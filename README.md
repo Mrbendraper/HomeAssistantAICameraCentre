@@ -291,11 +291,22 @@ JavaScript isn't reaching your browser. Check, in order:
    you should see JavaScript. A 404 means the integration isn't set up or
    an old version is installed (HACS → Redownload, restart, and make sure
    the integration entry exists under Devices & Services).
-2. *Is the resource registered?* Settings → Dashboards → ⋮ → Resources
-   (requires "Advanced mode" on your profile). There should be an entry for
-   `/ai_camera_centre/ai-camera-centre-card.js`; add it manually as a
-   **JavaScript module** if missing, and delete any stale
+2. *Is the resource registered, and on the current version?* Settings →
+   Dashboards → ⋮ → Resources (requires "Advanced mode" on your profile).
+   There should be an entry for
+   `/ai_camera_centre/ai-camera-centre-card.js?v=<version>`; add it manually
+   as a **JavaScript module** if missing, and delete any stale
    `/alert_history/...` entry.
+
+   **Check the `?v=` matches your installed version.** That query is the
+   cache-buster, and before 2.8.3 it was only ever written on first install —
+   so an instance upgraded over time could still be requesting (and your
+   browser still serving from cache) the JavaScript from the version you
+   originally installed. The visible symptom is cards added in later releases
+   going missing: the **AI Camera Centre People** card absent from the card
+   picker, and a *configuration error* when added by hand. 2.8.3 rewrites the
+   version on upgrade; to fix an affected instance immediately, edit the `?v=`
+   to the current version (or delete the row and restart), then hard-refresh.
 3. *Clear the frontend cache* — this is the usual culprit. Hard-refresh the
    browser (Ctrl+F5); in the companion app: Settings → Companion App →
    Debugging → **Reset frontend cache**.
