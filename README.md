@@ -132,11 +132,23 @@ Copy `custom_components/ai_camera_centre/` into your
    household member or regular — a **name** and a **description** of
    distinguishing features (build, typical clothing, a pet, a wheelchair,
    etc.). The description is added to every camera's prompt so the AI can
-   recognise them and score them low. To also give the AI **reference photos**,
-   add an *AI Camera Centre People* card to a dashboard
-   (`type: custom:ai-camera-centre-people-card`) and upload photos for each
-   person there (admin only). Photos are stored under
-   `<config>/ai_camera_centre/known/` and attached to the AI prompt.
+   recognise them and score them low.
+
+   **Reference photos are not managed here** — they live on a dashboard card,
+   so the AI can match faces visually rather than only by description:
+
+   1. Add the person above first (photos attach to an existing visitor).
+   2. Open any dashboard → **Edit** → **+ Add Card** → search
+      **"AI Camera Centre People"** (or add
+      `type: custom:ai-camera-centre-people-card` in YAML).
+   3. Each person on the card gets a **+ Add photo** button; uploaded photos
+      appear as thumbnails with a **×** to remove them.
+
+   Uploading is **admin-only**. Photos are stored under
+   `<config>/ai_camera_centre/known/<visitor_id>/` and attached to the AI
+   prompt. If the card doesn't appear in the picker, the bundled resource
+   hasn't loaded — hard-refresh the browser (Ctrl+F5) or reset the companion
+   app's frontend cache.
 5. Optional, in the integration's **Configure** button (global **Settings**).
    The settings are grouped into collapsible sections, each with inline help:
    - **Capture & analysis** — snapshots per analysis, the delay between them,
@@ -307,6 +319,20 @@ Motion triggers** so they point at the current entity. You can confirm which
 entity is actually flipping under Developer Tools → States, and cross-check the
 ids each camera is configured with in the integration's **Download
 diagnostics** (⋮ menu).
+
+**A camera only fires sometimes, for the wrong kind of event** — check which
+trigger entities it's actually subscribed to. Cameras of the same model share
+a device name, so Home Assistant disambiguates their entity ids with numeric
+suffixes (`..._motion_2`, `..._person_3`), and it's easy to pick sensors
+belonging to a *different* camera — or to pick only some event types (e.g.
+*vehicle* and *animal* but not *motion* or *person*, so the camera never fires
+for a person). Everything resolves and nothing errors; the camera just stays
+quiet. Since 2.8.2 a warning is logged at startup when a trigger belongs to a
+different device than the camera entity. To check by hand: Settings → Devices &
+Services → **Entities**, search the entity id, and look at its **Device**
+column. Renaming each camera device (Settings → Devices → rename, and accept
+the entity-rename prompt) turns `reolink_trackmix_poe_person_3` into
+`front_garden_person` and makes this mistake much harder.
 
 **A camera doesn't react to motion** — turn on debug logging and trigger it;
 every step of the trigger path reports what it did:

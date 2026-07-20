@@ -663,6 +663,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     known_visitors = _known_visitors(entry)
 
     ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
     pipelines: dict[str, CameraPipeline] = {}
     for sub in entry.subentries.values():
         if sub.subentry_type != SUBENTRY_CAMERA:
@@ -681,10 +682,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pipelines[camera_id] = pipeline
         motion_entities = camera_conf.get(CONF_MOTION_ENTITIES) or []
         if motion_entities:
+            camera_label = camera_conf.get(CONF_CAMERA_NAME) or camera_id
             _warn_unknown_motion_entities(
+                hass, ent_reg, camera_label, motion_entities
+            )
+            _warn_trigger_device_mismatch(
                 hass,
                 ent_reg,
-                camera_conf.get(CONF_CAMERA_NAME) or camera_id,
+                dev_reg,
+                camera_label,
+                camera_conf.get(CONF_CAMERA_ENTITY),
                 motion_entities,
             )
             entry.async_on_unload(
@@ -785,6 +792,62 @@ def _warn_unknown_motion_entities(
             "when the source integration is updated or the device is renamed.",
             camera_label,
             ", ".join(missing),
+        )
+
+
+@callback
+def _warn_trigger_device_mismatch(
+    hass: HomeAssistant,
+    ent_reg: er.EntityRegistry,
+    dev_reg: dr.DeviceRegistry,
+    camera_label: str,
+    camera_entity: str | None,
+    motion_entities: list[str],
+) -> None:
+    """Warn when a motion trigger belongs to a different device than the camera.
+
+    Cameras of the same model usually share a device name, so Home Assistant
+    disambiguates their entity ids with numeric suffixes (``..._motion_2``,
+    ``..._person_3``). Picking the wrong one is easy and completely silent:
+    every entity resolves, nothing errors, and the camera simply never fires
+    for the events you expected — it only wakes for whatever the mis-picked
+    sensor reports.
+
+    Cross-device triggers are legitimate (a separate PIR covering the same
+    view), so this is advisory. Helpers (input_boolean/switch) have no device
+    and are skipped.
+    """
+    if not camera_entity:
+        return
+    source = ent_reg.async_get(camera_entity)
+    if source is None or source.device_id is None:
+        return
+
+    def _device_name(device_id: str) -> str:
+        device = dev_reg.async_get(device_id)
+        if device is None:
+            return "unknown device"
+        return device.name_by_user or device.name or "unnamed device"
+
+    mismatched = [
+        f"{entity_id} (device: {_device_name(entry.device_id)})"
+        for entity_id in motion_entities
+        if (entry := ent_reg.async_get(entity_id)) is not None
+        and entry.device_id is not None
+        and entry.device_id != source.device_id
+    ]
+    if mismatched:
+        _LOGGER.warning(
+            "Camera '%s': motion trigger(s) %s belong to a different device "
+            "than its camera entity %s (device: %s). That is supported — e.g. "
+            "a separate motion sensor covering the same view — but it is also "
+            "what a mis-picked trigger looks like when several cameras share a "
+            "device name. If this camera isn't firing when you expect, check "
+            "its Motion triggers.",
+            camera_label,
+            ", ".join(mismatched),
+            camera_entity,
+            _device_name(source.device_id),
         )
 
 

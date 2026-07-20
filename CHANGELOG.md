@@ -3,6 +3,25 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.8.2]
+
+### Added
+- **Warning when a camera's motion trigger belongs to a different device.**
+  Cameras of the same model share a device name, so Home Assistant
+  disambiguates their entity ids with numeric suffixes (`..._motion_2`,
+  `..._person_3`) — and picking the wrong one is silent: every entity
+  resolves, nothing errors, and the camera only ever wakes for whatever the
+  mis-picked sensor reports (e.g. subscribed to *vehicle* and *animal* but not
+  *motion* or *person*, so it never fires for a person). Setup now logs an
+  advisory warning naming the trigger and the device it actually belongs to.
+  Cross-device triggers stay supported (a separate PIR covering the same view)
+  — the warning just makes the mismatch visible.
+
+### Documentation
+- README: document that reference photos for known people are managed from the
+  bundled **AI Camera Centre People** dashboard card, not from the integration
+  settings — with the steps to add it.
+
 ## [2.8.1]
 
 ### Fixed
