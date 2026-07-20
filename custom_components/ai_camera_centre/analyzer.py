@@ -88,6 +88,7 @@ from .const import (
     POLICY_CUSTOM,
     PRESENCE_ONLY_AWAY,
     PRESENCE_ONLY_HOME,
+    SIGNAL_ANALYSIS_FAILED,
     SIGNAL_NEW_ALERT,
     SNAPSHOTS_URL,
     SUN_ABOVE_HORIZON,
@@ -218,6 +219,35 @@ def _write_file(path: str, data: bytes) -> None:
         fh.write(data)
 
 
+# Markers of a temporary, retryable provider problem (as opposed to the
+# provider genuinely not supporting structured output). Matched case-
+# insensitively against the error text.
+_TRANSIENT_ERROR_MARKERS = (
+    "503",
+    "500",
+    "429",
+    "unavailable",
+    "overload",
+    "high demand",
+    "try again",
+    "rate limit",
+    "ratelimit",
+    "timeout",
+    "timed out",
+    "deadline",
+    "internal error",
+    "temporarily",
+)
+
+
+def _is_transient_error(err: Exception) -> bool:
+    """True if the error looks temporary and worth retrying, not a capability
+    limit. Errs toward "not transient" so a real structure-unsupported error
+    still falls back to text parsing."""
+    message = str(err).lower()
+    return any(marker in message for marker in _TRANSIENT_ERROR_MARKERS)
+
+
 def _parse_ai_result(raw: Any) -> dict[str, Any]:
     """Normalise an ai_task response into the alert field dict."""
     if isinstance(raw, str):
@@ -225,10 +255,21 @@ def _parse_ai_result(raw: Any) -> dict[str, Any]:
         raw = json.loads(cleaned)
     if not isinstance(raw, dict):
         raise HomeAssistantError(f"Unexpected AI response type: {type(raw).__name__}")
+    # A missing/non-numeric score means a degraded, blocked or truncated
+    # response — not a genuine "all clear". Treating it as score 1 would
+    # manufacture a benign alert and, during a provider outage, hide a real
+    # threat. Raise so it is counted and surfaced as a failed analysis.
+    raw_score = raw.get("suspicious_index")
+    if raw_score is None:
+        raise HomeAssistantError(
+            "AI response missing suspicious_index (degraded/blocked response)"
+        )
     try:
-        score = int(float(raw.get("suspicious_index", 1)))
-    except (TypeError, ValueError):
-        score = 1
+        score = int(float(raw_score))
+    except (TypeError, ValueError) as err:
+        raise HomeAssistantError(
+            f"AI response has non-numeric suspicious_index: {raw_score!r}"
+        ) from err
     return {
         "score": min(10, max(1, score)),
         "short": str(raw.get("short", "")),
@@ -403,6 +444,9 @@ class CameraPipeline:
             except Exception as err:  # noqa: BLE001 - never break the listener
                 _LOGGER.exception("%s: camera analysis failed", self.camera_id)
                 self._record_activity(f"Analysis failed: {err}")
+                async_dispatcher_send(
+                    self.hass, SIGNAL_ANALYSIS_FAILED, self.camera_id
+                )
 
     @callback
     def _record_activity(self, message: str) -> None:
@@ -837,15 +881,25 @@ class CameraPipeline:
                         "structure": ALERT_STRUCTURE,
                     }
                 )
-                return _parse_ai_result(data)
-            except Exception as err:  # noqa: BLE001 - structure unsupported
+            except Exception as err:  # noqa: BLE001 - classify below
+                # A transient provider error (503/overloaded/timeout/rate
+                # limit) must NOT permanently drop the session to the weaker
+                # text parser — that latched off over a single blip before.
+                # Fail this event (it is counted) and retry structured next
+                # time. Only a genuine "structure unsupported" latches off.
+                if _is_transient_error(err):
+                    raise
                 _LOGGER.info(
-                    "%s: structured AI output unavailable (%s); using text "
+                    "%s: structured AI output unsupported (%s); using text "
                     "parsing for the rest of this session",
                     self.camera_id,
                     err,
                 )
                 self._structured_ok = False
+            else:
+                # The call succeeded; a parse failure here is a degraded
+                # response, counted as a failure, and does not latch off.
+                return _parse_ai_result(data)
 
         data = await self._call_ai_task(
             {**base, "instructions": instructions + JSON_OUTPUT_SUFFIX}

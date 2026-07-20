@@ -3,6 +3,31 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.11.0]
+
+### Fixed
+- **A degraded AI response no longer scores as "benign".** When a response was
+  missing its score (a blocked, truncated or errored reply), the score silently
+  defaulted to 1 — manufacturing a fake "all clear" and, during a provider
+  outage, hiding a genuine threat. A missing or non-numeric score is now treated
+  as a **failed analysis** (counted and surfaced) rather than a real verdict.
+- **A transient provider error no longer degrades the whole session.** A single
+  temporary failure of the structured-output call (503 / overloaded / rate
+  limit / timeout) used to latch the pipeline into the weaker text parser until
+  the next restart. Transient errors now fail just that event and retry
+  structured output next time; only a genuine "structure unsupported" error
+  falls back for the session.
+
+### Added
+- **Per-camera "Analysis failures" statistics sensor.** A new
+  `sensor.<camera>_analysis_failures` counts failed analyses as a
+  `total_increasing` counter, so Home Assistant keeps long-term statistics and
+  the failure rate can be charted per hour/day/week/month from the History /
+  Statistics UI — a direct read on how often, and when, events are going
+  unassessed (e.g. during an AI-provider outage). The count persists across
+  restarts. Failures also appear in the logbook (2.10.0) and fire the
+  `ai_camera_centre_analysis_failed` dispatcher signal.
+
 ## [2.10.0]
 
 ### Added

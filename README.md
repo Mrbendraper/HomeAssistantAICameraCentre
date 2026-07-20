@@ -215,6 +215,7 @@ Each camera device exposes:
 | `image.<camera>_latest_alert` | The latest alert snapshot (drop onto a dashboard) |
 | `switch.<camera>_analysis` | Turn a camera's automatic analysis off/on (holiday mode, gardener day). The *Analyze now* button and service still work while off |
 | `button.<camera>_analyze` | Run an analysis on demand |
+| `sensor.<camera>_analysis_failures` | Cumulative count of failed analyses (provider error, blocked/degraded response, missing score). A `total_increasing` statistics counter — chart it per day/week/month to see how often events go unassessed. Diagnostic |
 
 ### Events
 
