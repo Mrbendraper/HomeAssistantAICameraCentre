@@ -3,6 +3,19 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.9.0]
+
+### Added
+- **Add known people directly from the People card.** The card now has an
+  **+ Add person** button with name and description fields, so a person can be
+  created in the same place their photos are managed. Previously the only route
+  was Settings → Devices & Services → AI Camera Centre → *Add known visitor*,
+  then back to a dashboard to upload the photos — which was not discoverable
+  from the card at all. Backed by a new admin-only
+  `ai_camera_centre/add_visitor` websocket command that creates the same
+  `known_visitor` subentry the config flow does, so both routes are equivalent
+  and names still de-duplicate.
+
 ## [2.8.3]
 
 ### Fixed

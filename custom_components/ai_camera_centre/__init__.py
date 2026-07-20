@@ -14,6 +14,7 @@ import os
 import secrets
 import shutil
 import time
+from types import MappingProxyType
 from datetime import timedelta
 from typing import Any
 
@@ -24,7 +25,7 @@ from aiohttp import web
 from homeassistant.components import websocket_api
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.components.http.auth import async_sign_path
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import (
     Event,
@@ -510,6 +511,58 @@ async def ws_delete_visitor_photo(
     connection.send_result(msg["id"], {"deleted": deleted})
 
 
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/add_visitor",
+        vol.Required("name"): vol.All(str, vol.Length(min=1, max=100)),
+        vol.Optional("description", default=""): vol.All(str, vol.Length(max=1000)),
+    }
+)
+@websocket_api.async_response
+async def ws_add_visitor(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Add a known visitor from the people card (admin only).
+
+    Mirrors the KnownVisitorSubentryFlow so a person can be created in the
+    same place their photos are managed, instead of sending the user to the
+    integration page and back.
+    """
+    entry: ConfigEntry | None = hass.data.get(DOMAIN, {}).get("entry")
+    if entry is None:
+        connection.send_error(msg["id"], "not_ready", "Integration not ready")
+        return
+    name = msg["name"].strip()
+    visitor_id = slugify(name)
+    if not visitor_id:
+        connection.send_error(msg["id"], "invalid_name", "Please enter a name")
+        return
+    if visitor_id in {v[CONF_VISITOR_ID] for v in _known_visitors(entry)}:
+        connection.send_error(
+            msg["id"], "duplicate_visitor", f"'{name}' already exists"
+        )
+        return
+    hass.config_entries.async_add_subentry(
+        entry,
+        ConfigSubentry(
+            data=MappingProxyType(
+                {
+                    CONF_VISITOR_ID: visitor_id,
+                    CONF_VISITOR_NAME: name,
+                    CONF_VISITOR_DESCRIPTION: msg["description"].strip(),
+                }
+            ),
+            subentry_type=SUBENTRY_KNOWN_VISITOR,
+            title=name,
+            unique_id=visitor_id,
+        ),
+    )
+    connection.send_result(msg["id"], {"visitor_id": visitor_id})
+
+
 class KnownPhotoUploadView(HomeAssistantView):
     """Authenticated endpoint the people card posts reference photos to."""
 
@@ -669,6 +722,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         websocket_api.async_register_command(hass, ws_subscribe_alerts)
         websocket_api.async_register_command(hass, ws_list_visitors)
         websocket_api.async_register_command(hass, ws_delete_visitor_photo)
+        websocket_api.async_register_command(hass, ws_add_visitor)
         hass.http.register_view(KnownPhotoUploadView())
         hass.http.register_view(AlertImageView())
         hass.data[DOMAIN]["http_registered"] = True

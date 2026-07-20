@@ -134,15 +134,17 @@ Copy `custom_components/ai_camera_centre/` into your
    etc.). The description is added to every camera's prompt so the AI can
    recognise them and score them low.
 
-   **Reference photos are not managed here** — they live on a dashboard card,
-   so the AI can match faces visually rather than only by description:
+   **Reference photos live on a dashboard card**, so the AI can match faces
+   visually rather than only by description:
 
-   1. Add the person above first (photos attach to an existing visitor).
-   2. Open any dashboard → **Edit** → **+ Add Card** → search
+   1. Open any dashboard → **Edit** → **+ Add Card** → search
       **"AI Camera Centre People"** (or add
       `type: custom:ai-camera-centre-people-card` in YAML).
-   3. Each person on the card gets a **+ Add photo** button; uploaded photos
-      appear as thumbnails with a **×** to remove them.
+   2. Use **+ Add person** on the card to create people (name + description) —
+      the same thing the *Add known visitor* button does, so you can stay on
+      the dashboard.
+   3. Each person then gets a **+ Add photo** button; uploaded photos appear as
+      thumbnails with a **×** to remove them.
 
    Uploading is **admin-only**. Photos are stored under
    `<config>/ai_camera_centre/known/<visitor_id>/` and attached to the AI
