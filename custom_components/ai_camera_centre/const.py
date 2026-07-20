@@ -1,7 +1,7 @@
 """Constants for the AI Camera Centre integration."""
 
 DOMAIN = "ai_camera_centre"
-VERSION = "2.8.1"
+VERSION = "2.11.0"
 
 # subentry types
 SUBENTRY_CAMERA = "camera"
@@ -26,6 +26,10 @@ CONF_ALARMO_TRIGGER_SCORE = "alarmo_trigger_score"
 CONF_MIN_LOG_SCORE = "min_log_score"
 CONF_LOG_WINDOW_START = "log_window_start"
 CONF_LOG_WINDOW_END = "log_window_end"
+# record every analysis outcome (incl. sub-threshold + failures) to the
+# Home Assistant logbook, so a working-but-quiet camera is visible there
+CONF_LOG_ACTIVITY = "log_activity"
+DEFAULT_LOG_ACTIVITY = True
 # repeat-visitor context
 CONF_REPEAT_CONTEXT_MINUTES = "repeat_context_minutes"
 # AI personality / response-style override (global, wording only)
@@ -141,6 +145,9 @@ CARD_URL = f"/{DOMAIN}/ai-camera-centre-card.js"
 UPLOAD_URL = f"/api/{DOMAIN}/known_photo"
 
 SIGNAL_NEW_ALERT = f"{DOMAIN}_new_alert"
+# dispatched with the camera_id whenever an analysis fails (provider error,
+# degraded/blocked response, missing score) so the failure-count sensor ticks
+SIGNAL_ANALYSIS_FAILED = f"{DOMAIN}_analysis_failed"
 
 # fired on the HA event bus for every alert (logged or not) so users can
 # build their own automations

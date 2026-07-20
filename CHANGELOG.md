@@ -3,6 +3,105 @@
 All notable changes to AI Camera Centre. Versions follow the
 `custom_components/ai_camera_centre/manifest.json` `version`.
 
+## [2.11.0]
+
+### Fixed
+- **A degraded AI response no longer scores as "benign".** When a response was
+  missing its score (a blocked, truncated or errored reply), the score silently
+  defaulted to 1 — manufacturing a fake "all clear" and, during a provider
+  outage, hiding a genuine threat. A missing or non-numeric score is now treated
+  as a **failed analysis** (counted and surfaced) rather than a real verdict.
+- **A transient provider error no longer degrades the whole session.** A single
+  temporary failure of the structured-output call (503 / overloaded / rate
+  limit / timeout) used to latch the pipeline into the weaker text parser until
+  the next restart. Transient errors now fail just that event and retry
+  structured output next time; only a genuine "structure unsupported" error
+  falls back for the session.
+
+### Added
+- **Per-camera "Analysis failures" statistics sensor.** A new
+  `sensor.<camera>_analysis_failures` counts failed analyses as a
+  `total_increasing` counter, so Home Assistant keeps long-term statistics and
+  the failure rate can be charted per hour/day/week/month from the History /
+  Statistics UI — a direct read on how often, and when, events are going
+  unassessed (e.g. during an AI-provider outage). The count persists across
+  restarts. Failures also appear in the logbook (2.10.0) and fire the
+  `ai_camera_centre_analysis_failed` dispatcher signal.
+
+## [2.10.0]
+
+### Added
+- **Analysis activity in the logbook.** Only *archived* alerts appeared
+  anywhere in the UI, so a camera that was triggering and analysing normally
+  but scoring below the log threshold looked completely dead — the
+  trigger → analysis → "below threshold, not logged" trace lived only in the
+  debug log. Each analysis outcome is now written to the camera device's
+  Home Assistant **logbook** (its Activity timeline): sub-threshold results
+  ("Analysed (score 1) — below the log threshold (min 2), not logged"),
+  "no significant motion", logged alerts, and **failures** ("Analysis failed:
+  …"), so an outage or a flaky AI provider is visible instead of silent. A new
+  **Record analyses to the logbook** toggle (Alerts & history, on by default)
+  turns it off for anyone who finds it noisy.
+
+## [2.9.0]
+
+### Added
+- **Add known people directly from the People card.** The card now has an
+  **+ Add person** button with name and description fields, so a person can be
+  created in the same place their photos are managed. Previously the only route
+  was Settings → Devices & Services → AI Camera Centre → *Add known visitor*,
+  then back to a dashboard to upload the photos — which was not discoverable
+  from the card at all. Backed by a new admin-only
+  `ai_camera_centre/add_visitor` websocket command that creates the same
+  `known_visitor` subentry the config flow does, so both routes are equivalent
+  and names still de-duplicate.
+
+### Fixed
+- **Websocket handlers failed during a config-entry reload.** Adding or editing
+  a subentry reloads the entry, which clears the cached runtime data those
+  handlers read the config entry from. Anything arriving in that window failed:
+  adding two people in quick succession returned "integration not ready", and
+  the card's refresh straight after an add listed no people at all. Handlers
+  that only need the config entry now read it from the config-entry registry,
+  which survives the reload, and the visitor list degrades to omitting photos
+  rather than returning nothing while the store is rebuilding.
+
+## [2.8.3]
+
+### Fixed
+- **The bundled card was pinned to the version you first installed.** The
+  Lovelace resource is registered as
+  `/ai_camera_centre/ai-camera-centre-card.js?v=<version>`, where the query is
+  the cache-buster for a file served with long-lived cache headers. Auto-
+  registration only ran when no resource existed yet: on every later upgrade it
+  found the URL, ignored the query and returned, so dashboards kept requesting
+  the *original* `?v=` and browsers kept serving that cached JS forever. Anyone
+  who installed before 2.6.0 therefore never received the **AI Camera Centre
+  People** card — it was missing from the card picker, and adding it by hand
+  failed because the element was never defined. The resource URL is now updated
+  to the running version on upgrade, busting the cache.
+  - If you hit this, the fix applies on the next restart; a browser hard-refresh
+    (or *Reset frontend cache* in the companion app) may still be needed once.
+
+## [2.8.2]
+
+### Added
+- **Warning when a camera's motion trigger belongs to a different device.**
+  Cameras of the same model share a device name, so Home Assistant
+  disambiguates their entity ids with numeric suffixes (`..._motion_2`,
+  `..._person_3`) — and picking the wrong one is silent: every entity
+  resolves, nothing errors, and the camera only ever wakes for whatever the
+  mis-picked sensor reports (e.g. subscribed to *vehicle* and *animal* but not
+  *motion* or *person*, so it never fires for a person). Setup now logs an
+  advisory warning naming the trigger and the device it actually belongs to.
+  Cross-device triggers stay supported (a separate PIR covering the same view)
+  — the warning just makes the mismatch visible.
+
+### Documentation
+- README: document that reference photos for known people are managed from the
+  bundled **AI Camera Centre People** dashboard card, not from the integration
+  settings — with the steps to add it.
+
 ## [2.8.1]
 
 ### Fixed

@@ -22,6 +22,7 @@ from homeassistant.components import camera
 from homeassistant.components.http.auth import async_sign_path
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
@@ -38,6 +39,7 @@ from .const import (
     CONF_CAMERA_NAME,
     CONF_COOLDOWN_SECONDS,
     CONF_DASHBOARD_PATH,
+    CONF_LOG_ACTIVITY,
     CONF_LOG_WINDOW_END,
     CONF_LOG_WINDOW_START,
     CONF_MIN_LOG_SCORE,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_CAMERA_MOTION_POLICY,
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_DASHBOARD_PATH,
+    DEFAULT_LOG_ACTIVITY,
     DEFAULT_MIN_LOG_SCORE,
     DEFAULT_PROCESS_ARMED,
     DEFAULT_PROCESS_PRESENCE,
@@ -85,6 +88,7 @@ from .const import (
     POLICY_CUSTOM,
     PRESENCE_ONLY_AWAY,
     PRESENCE_ONLY_HOME,
+    SIGNAL_ANALYSIS_FAILED,
     SIGNAL_NEW_ALERT,
     SNAPSHOTS_URL,
     SUN_ABOVE_HORIZON,
@@ -215,6 +219,35 @@ def _write_file(path: str, data: bytes) -> None:
         fh.write(data)
 
 
+# Markers of a temporary, retryable provider problem (as opposed to the
+# provider genuinely not supporting structured output). Matched case-
+# insensitively against the error text.
+_TRANSIENT_ERROR_MARKERS = (
+    "503",
+    "500",
+    "429",
+    "unavailable",
+    "overload",
+    "high demand",
+    "try again",
+    "rate limit",
+    "ratelimit",
+    "timeout",
+    "timed out",
+    "deadline",
+    "internal error",
+    "temporarily",
+)
+
+
+def _is_transient_error(err: Exception) -> bool:
+    """True if the error looks temporary and worth retrying, not a capability
+    limit. Errs toward "not transient" so a real structure-unsupported error
+    still falls back to text parsing."""
+    message = str(err).lower()
+    return any(marker in message for marker in _TRANSIENT_ERROR_MARKERS)
+
+
 def _parse_ai_result(raw: Any) -> dict[str, Any]:
     """Normalise an ai_task response into the alert field dict."""
     if isinstance(raw, str):
@@ -222,10 +255,21 @@ def _parse_ai_result(raw: Any) -> dict[str, Any]:
         raw = json.loads(cleaned)
     if not isinstance(raw, dict):
         raise HomeAssistantError(f"Unexpected AI response type: {type(raw).__name__}")
+    # A missing/non-numeric score means a degraded, blocked or truncated
+    # response — not a genuine "all clear". Treating it as score 1 would
+    # manufacture a benign alert and, during a provider outage, hide a real
+    # threat. Raise so it is counted and surfaced as a failed analysis.
+    raw_score = raw.get("suspicious_index")
+    if raw_score is None:
+        raise HomeAssistantError(
+            "AI response missing suspicious_index (degraded/blocked response)"
+        )
     try:
-        score = int(float(raw.get("suspicious_index", 1)))
-    except (TypeError, ValueError):
-        score = 1
+        score = int(float(raw_score))
+    except (TypeError, ValueError) as err:
+        raise HomeAssistantError(
+            f"AI response has non-numeric suspicious_index: {raw_score!r}"
+        ) from err
     return {
         "score": min(10, max(1, score)),
         "short": str(raw.get("short", "")),
@@ -295,6 +339,9 @@ class CameraPipeline:
         )
         self.log_window_start = global_options.get(CONF_LOG_WINDOW_START)
         self.log_window_end = global_options.get(CONF_LOG_WINDOW_END)
+        self.log_activity = bool(
+            global_options.get(CONF_LOG_ACTIVITY, DEFAULT_LOG_ACTIVITY)
+        )
         # context injected into the prompt
         self.known_visitors = known_visitors or []
         self.repeat_context_minutes = int(
@@ -394,8 +441,36 @@ class CameraPipeline:
             self._last_run = time.monotonic()
             try:
                 await self._run(force=force)
-            except Exception:  # noqa: BLE001 - never break the listener
+            except Exception as err:  # noqa: BLE001 - never break the listener
                 _LOGGER.exception("%s: camera analysis failed", self.camera_id)
+                self._record_activity(f"Analysis failed: {err}")
+                async_dispatcher_send(
+                    self.hass, SIGNAL_ANALYSIS_FAILED, self.camera_id
+                )
+
+    @callback
+    def _record_activity(self, message: str) -> None:
+        """Write one analysis-outcome line to the Home Assistant logbook.
+
+        Sub-threshold and failed analyses never reach the alert history, so
+        without this a working-but-quiet camera looks dead in its Activity
+        timeline. Attaching the entry to the camera's recent-alert entity
+        places it in that device's logbook, alongside its switch/button events.
+        """
+        if not self.log_activity:
+            return
+        try:
+            from homeassistant.components.logbook import (  # noqa: PLC0415
+                async_log_entry,
+            )
+        except ImportError:  # logbook component unavailable
+            return
+        entity_id = er.async_get(self.hass).async_get_entity_id(
+            "binary_sensor", DOMAIN, f"{self.camera_id}_recent_alert"
+        )
+        if entity_id is None:
+            return
+        async_log_entry(self.hass, self.label, message, DOMAIN, entity_id)
 
     # -- pipeline steps ---------------------------------------------------
 
@@ -404,6 +479,7 @@ class CameraPipeline:
         report = await self._analyze_frames(paths)
         if NO_MOTION_MARKER in report["short"].lower():
             _LOGGER.debug("%s: AI saw no significant motion", self.camera_id)
+            self._record_activity("Analysed — no significant motion")
             return
         mid_path = paths[len(paths) // 2]
 
@@ -423,11 +499,23 @@ class CameraPipeline:
             async_dispatcher_send(self.hass, SIGNAL_NEW_ALERT, record)
             image_url = record["image"]
             logged = True
+            self._record_activity(
+                f"Logged alert (score {report['score']}): "
+                f"{report['short'] or 'motion detected'}"
+            )
         else:
             _LOGGER.debug(
                 "%s: alert (score %s) not archived (logging rules)",
                 self.camera_id,
                 report["score"],
+            )
+            reason = (
+                f"below the log threshold (min {self.min_log_score})"
+                if report["score"] < self.min_log_score
+                else "outside the log time window"
+            )
+            self._record_activity(
+                f"Analysed (score {report['score']}) — {reason}, not logged"
             )
             image_url = f"{SNAPSHOTS_URL}/{os.path.basename(mid_path)}"
             logged = False
@@ -793,15 +881,25 @@ class CameraPipeline:
                         "structure": ALERT_STRUCTURE,
                     }
                 )
-                return _parse_ai_result(data)
-            except Exception as err:  # noqa: BLE001 - structure unsupported
+            except Exception as err:  # noqa: BLE001 - classify below
+                # A transient provider error (503/overloaded/timeout/rate
+                # limit) must NOT permanently drop the session to the weaker
+                # text parser — that latched off over a single blip before.
+                # Fail this event (it is counted) and retry structured next
+                # time. Only a genuine "structure unsupported" latches off.
+                if _is_transient_error(err):
+                    raise
                 _LOGGER.info(
-                    "%s: structured AI output unavailable (%s); using text "
+                    "%s: structured AI output unsupported (%s); using text "
                     "parsing for the rest of this session",
                     self.camera_id,
                     err,
                 )
                 self._structured_ok = False
+            else:
+                # The call succeeded; a parse failure here is a degraded
+                # response, counted as a failure, and does not latch off.
+                return _parse_ai_result(data)
 
         data = await self._call_ai_task(
             {**base, "instructions": instructions + JSON_OUTPUT_SUFFIX}

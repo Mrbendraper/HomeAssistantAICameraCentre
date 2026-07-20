@@ -132,11 +132,25 @@ Copy `custom_components/ai_camera_centre/` into your
    household member or regular — a **name** and a **description** of
    distinguishing features (build, typical clothing, a pet, a wheelchair,
    etc.). The description is added to every camera's prompt so the AI can
-   recognise them and score them low. To also give the AI **reference photos**,
-   add an *AI Camera Centre People* card to a dashboard
-   (`type: custom:ai-camera-centre-people-card`) and upload photos for each
-   person there (admin only). Photos are stored under
-   `<config>/ai_camera_centre/known/` and attached to the AI prompt.
+   recognise them and score them low.
+
+   **Reference photos live on a dashboard card**, so the AI can match faces
+   visually rather than only by description:
+
+   1. Open any dashboard → **Edit** → **+ Add Card** → search
+      **"AI Camera Centre People"** (or add
+      `type: custom:ai-camera-centre-people-card` in YAML).
+   2. Use **+ Add person** on the card to create people (name + description) —
+      the same thing the *Add known visitor* button does, so you can stay on
+      the dashboard.
+   3. Each person then gets a **+ Add photo** button; uploaded photos appear as
+      thumbnails with a **×** to remove them.
+
+   Uploading is **admin-only**. Photos are stored under
+   `<config>/ai_camera_centre/known/<visitor_id>/` and attached to the AI
+   prompt. If the card doesn't appear in the picker, the bundled resource
+   hasn't loaded — hard-refresh the browser (Ctrl+F5) or reset the companion
+   app's frontend cache.
 5. Optional, in the integration's **Configure** button (global **Settings**).
    The settings are grouped into collapsible sections, each with inline help:
    - **Capture & analysis** — snapshots per analysis, the delay between them,
@@ -201,6 +215,7 @@ Each camera device exposes:
 | `image.<camera>_latest_alert` | The latest alert snapshot (drop onto a dashboard) |
 | `switch.<camera>_analysis` | Turn a camera's automatic analysis off/on (holiday mode, gardener day). The *Analyze now* button and service still work while off |
 | `button.<camera>_analyze` | Run an analysis on demand |
+| `sensor.<camera>_analysis_failures` | Cumulative count of failed analyses (provider error, blocked/degraded response, missing score). A `total_increasing` statistics counter — chart it per day/week/month to see how often events go unassessed. Diagnostic |
 
 ### Events
 
@@ -279,11 +294,22 @@ JavaScript isn't reaching your browser. Check, in order:
    you should see JavaScript. A 404 means the integration isn't set up or
    an old version is installed (HACS → Redownload, restart, and make sure
    the integration entry exists under Devices & Services).
-2. *Is the resource registered?* Settings → Dashboards → ⋮ → Resources
-   (requires "Advanced mode" on your profile). There should be an entry for
-   `/ai_camera_centre/ai-camera-centre-card.js`; add it manually as a
-   **JavaScript module** if missing, and delete any stale
+2. *Is the resource registered, and on the current version?* Settings →
+   Dashboards → ⋮ → Resources (requires "Advanced mode" on your profile).
+   There should be an entry for
+   `/ai_camera_centre/ai-camera-centre-card.js?v=<version>`; add it manually
+   as a **JavaScript module** if missing, and delete any stale
    `/alert_history/...` entry.
+
+   **Check the `?v=` matches your installed version.** That query is the
+   cache-buster, and before 2.8.3 it was only ever written on first install —
+   so an instance upgraded over time could still be requesting (and your
+   browser still serving from cache) the JavaScript from the version you
+   originally installed. The visible symptom is cards added in later releases
+   going missing: the **AI Camera Centre People** card absent from the card
+   picker, and a *configuration error* when added by hand. 2.8.3 rewrites the
+   version on upgrade; to fix an affected instance immediately, edit the `?v=`
+   to the current version (or delete the row and restart), then hard-refresh.
 3. *Clear the frontend cache* — this is the usual culprit. Hard-refresh the
    browser (Ctrl+F5); in the companion app: Settings → Companion App →
    Debugging → **Reset frontend cache**.
@@ -307,6 +333,33 @@ Motion triggers** so they point at the current entity. You can confirm which
 entity is actually flipping under Developer Tools → States, and cross-check the
 ids each camera is configured with in the integration's **Download
 diagnostics** (⋮ menu).
+
+**A camera only fires sometimes, for the wrong kind of event** — check which
+trigger entities it's actually subscribed to. Cameras of the same model share
+a device name, so Home Assistant disambiguates their entity ids with numeric
+suffixes (`..._motion_2`, `..._person_3`), and it's easy to pick sensors
+belonging to a *different* camera — or to pick only some event types (e.g.
+*vehicle* and *animal* but not *motion* or *person*, so the camera never fires
+for a person). Everything resolves and nothing errors; the camera just stays
+quiet. Since 2.8.2 a warning is logged at startup when a trigger belongs to a
+different device than the camera entity. To check by hand: Settings → Devices &
+Services → **Entities**, search the entity id, and look at its **Device**
+column. Renaming each camera device (Settings → Devices → rename, and accept
+the entity-rename prompt) turns `reolink_trackmix_poe_person_3` into
+`front_garden_person` and makes this mistake much harder.
+
+**A camera is triggering but nothing appears in its history** — this is
+usually working as intended: the timeline card and alert history only show
+*archived* alerts, and an alert is archived only if its score is at or above
+**Minimum score to log** (and within the log time window, if set). A camera
+seeing only low-suspicion motion analyses every event but archives none. Since
+2.10.0 you can see those sub-threshold analyses (and any failures) in the
+camera **device's Logbook / Activity** timeline — "Analysed (score 1) — below
+the log threshold, not logged" — with a **Record analyses to the logbook**
+toggle in *Alerts & history* to turn it off. If you *expected* higher scores,
+check Settings → System → Logs for `ai_camera_centre`: a failing AI provider
+(e.g. a Google Generative AI `503`) is scored as low/benign, so a provider
+outage looks like a run of quiet events.
 
 **A camera doesn't react to motion** — turn on debug logging and trigger it;
 every step of the trigger path reports what it did:

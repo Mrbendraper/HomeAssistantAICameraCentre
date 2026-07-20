@@ -397,6 +397,7 @@ class AICameraCentrePeopleCard extends HTMLElement {
     this._visitors = [];
     this._error = null;
     this._busy = false;
+    this._adding = false;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this._render();
   }
@@ -459,6 +460,32 @@ class AICameraCentrePeopleCard extends HTMLElement {
     }
   }
 
+  async _addPerson(name, description) {
+    if (!this._hass) return;
+    if (!name.trim()) {
+      this._error = "Please enter a name.";
+      this._render();
+      return;
+    }
+    this._busy = true;
+    this._error = null;
+    this._render();
+    try {
+      await this._hass.callWS({
+        type: "ai_camera_centre/add_visitor",
+        name: name.trim(),
+        description: description.trim(),
+      });
+      this._adding = false;
+      await this._load();
+    } catch (e) {
+      this._error = "Could not add: " + (e.message || e.code || String(e));
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
   async _delete(visitorId, filename) {
     if (!this._hass) return;
     try {
@@ -513,10 +540,10 @@ class AICameraCentrePeopleCard extends HTMLElement {
     let body;
     if (this._error) {
       body = `<div class="empty">${this._esc(this._error)}</div>`;
-    } else if (!this._visitors.length) {
-      body = `<div class="empty">No known people yet. Add household members and
-        regulars from Settings &rarr; Devices &amp; Services &rarr; AI Camera
-        Centre &rarr; Add known visitor, then upload their photos here.</div>`;
+    } else if (!this._visitors.length && !this._adding) {
+      body = `<div class="empty">No known people yet. Use
+        <strong>+ Add person</strong> above to add a household member or
+        regular, then upload their photos here.</div>`;
     } else {
       body = this._visitors.map((v) => this._person(v)).join("");
     }
@@ -533,6 +560,33 @@ class AICameraCentrePeopleCard extends HTMLElement {
         .refresh {
           background: none; border: none; cursor: pointer; padding: 4px;
           color: var(--secondary-text-color); font-size: 16px; line-height: 1;
+        }
+        .header-actions { display: flex; align-items: center; gap: 4px; }
+        .add-person {
+          border: 1px solid var(--primary-color); color: var(--primary-color);
+          background: none; border-radius: 14px; padding: 3px 12px;
+          font-size: 12px; cursor: pointer; white-space: nowrap;
+        }
+        .add-person:hover { background: var(--secondary-background-color); }
+        .add-form {
+          display: flex; flex-direction: column; gap: 6px;
+          padding: 10px 16px; border-top: 1px solid var(--divider-color);
+        }
+        .add-form input, .add-form textarea {
+          font: inherit; font-size: 13px; padding: 6px 8px;
+          color: var(--primary-text-color);
+          background: var(--card-background-color);
+          border: 1px solid var(--divider-color); border-radius: 6px;
+          resize: vertical; box-sizing: border-box; width: 100%;
+        }
+        .add-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .add-actions button {
+          font: inherit; font-size: 12px; padding: 4px 12px; cursor: pointer;
+          border-radius: 14px; border: 1px solid var(--divider-color);
+          background: none; color: var(--secondary-text-color);
+        }
+        .add-actions .add-save {
+          border-color: var(--primary-color); color: var(--primary-color);
         }
         .person { padding: 10px 16px; border-top: 1px solid var(--divider-color); }
         .person-head {
@@ -573,9 +627,25 @@ class AICameraCentrePeopleCard extends HTMLElement {
       <ha-card>
         <div class="header">
           <span class="title">${this._esc(c.title)}</span>
-          <button class="refresh" title="Refresh">&#x21bb;</button>
+          <span class="header-actions">
+            <button class="add-person">+ Add person</button>
+            <button class="refresh" title="Refresh">&#x21bb;</button>
+          </span>
         </div>
-        ${this._busy ? `<div class="busy">Uploading&hellip;</div>` : ""}
+        ${
+          this._adding
+            ? `<div class="add-form">
+                 <input class="new-name" type="text" placeholder="Name (e.g. Ben, the postman)">
+                 <textarea class="new-desc" rows="2"
+                   placeholder="Description for the AI — build, typical clothing, a pet, a wheelchair&hellip;"></textarea>
+                 <div class="add-actions">
+                   <button class="add-cancel">Cancel</button>
+                   <button class="add-save">Add person</button>
+                 </div>
+               </div>`
+            : ""
+        }
+        ${this._busy ? `<div class="busy">Working&hellip;</div>` : ""}
         ${body}
       </ha-card>
     `;
@@ -583,6 +653,34 @@ class AICameraCentrePeopleCard extends HTMLElement {
     this.shadowRoot
       .querySelector(".refresh")
       .addEventListener("click", () => this._load());
+    this.shadowRoot.querySelector(".add-person").addEventListener("click", () => {
+      this._adding = !this._adding;
+      this._error = null;
+      this._render();
+      const field = this.shadowRoot.querySelector(".new-name");
+      if (field) field.focus();
+    });
+    const save = this.shadowRoot.querySelector(".add-save");
+    if (save) {
+      const submit = () =>
+        this._addPerson(
+          this.shadowRoot.querySelector(".new-name").value,
+          this.shadowRoot.querySelector(".new-desc").value
+        );
+      save.addEventListener("click", submit);
+      this.shadowRoot
+        .querySelector(".new-name")
+        .addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") submit();
+        });
+      this.shadowRoot
+        .querySelector(".add-cancel")
+        .addEventListener("click", () => {
+          this._adding = false;
+          this._error = null;
+          this._render();
+        });
+    }
     this.shadowRoot.querySelectorAll(".upload-input").forEach((el) =>
       el.addEventListener("change", (ev) => {
         const file = ev.target.files && ev.target.files[0];

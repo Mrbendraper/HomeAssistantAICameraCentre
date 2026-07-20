@@ -14,6 +14,7 @@ import os
 import secrets
 import shutil
 import time
+from types import MappingProxyType
 from datetime import timedelta
 from typing import Any
 
@@ -24,7 +25,7 @@ from aiohttp import web
 from homeassistant.components import websocket_api
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.components.http.auth import async_sign_path
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import (
     Event,
@@ -447,6 +448,18 @@ def _known_visitors(entry: ConfigEntry) -> list[dict[str, str]]:
     return out
 
 
+@callback
+def _config_entry(hass: HomeAssistant) -> ConfigEntry | None:
+    """The single config entry, read straight from the registry.
+
+    ``hass.data[DOMAIN]["entry"]`` is cleared for the duration of a reload —
+    which adding or editing a subentry triggers — so handlers that only need
+    the entry itself (rather than the loaded runtime data) must not depend on
+    it, or they fail for the moment right after a change.
+    """
+    return next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/visitors"})
 @websocket_api.async_response
 async def ws_list_visitors(
@@ -455,13 +468,17 @@ async def ws_list_visitors(
     msg: dict[str, Any],
 ) -> None:
     """Return known visitors and their reference-photo URLs for the card."""
-    data = hass.data.get(DOMAIN, {})
-    store: AlertStore | None = data.get("store")
-    entry: ConfigEntry | None = data.get("entry")
-    if store is None or entry is None:
+    store: AlertStore | None = hass.data.get(DOMAIN, {}).get("store")
+    entry = _config_entry(hass)
+    if entry is None:
         connection.send_result(msg["id"], {"visitors": []})
         return
-    photo_map = await hass.async_add_executor_job(store.known_photos_map)
+    # The store is briefly unavailable while the entry reloads — which is
+    # exactly when the card refreshes after adding someone. List the people
+    # regardless; their photos appear on the next refresh.
+    photo_map = (
+        await hass.async_add_executor_job(store.known_photos_map) if store else {}
+    )
     visitors = [
         {
             **v,
@@ -508,6 +525,62 @@ async def ws_delete_visitor_photo(
         connection.send_error(msg["id"], "invalid_filename", str(err))
         return
     connection.send_result(msg["id"], {"deleted": deleted})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/add_visitor",
+        vol.Required("name"): vol.All(str, vol.Length(min=1, max=100)),
+        vol.Optional("description", default=""): vol.All(str, vol.Length(max=1000)),
+    }
+)
+@websocket_api.async_response
+async def ws_add_visitor(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Add a known visitor from the people card (admin only).
+
+    Mirrors the KnownVisitorSubentryFlow so a person can be created in the
+    same place their photos are managed, instead of sending the user to the
+    integration page and back.
+    """
+    # Deliberately not hass.data: adding a subentry reloads the entry, so two
+    # adds in quick succession would find the runtime data missing.
+    entry = _config_entry(hass)
+    if entry is None:
+        connection.send_error(
+            msg["id"], "not_ready", "Integration not configured"
+        )
+        return
+    name = msg["name"].strip()
+    visitor_id = slugify(name)
+    if not visitor_id:
+        connection.send_error(msg["id"], "invalid_name", "Please enter a name")
+        return
+    if visitor_id in {v[CONF_VISITOR_ID] for v in _known_visitors(entry)}:
+        connection.send_error(
+            msg["id"], "duplicate_visitor", f"'{name}' already exists"
+        )
+        return
+    hass.config_entries.async_add_subentry(
+        entry,
+        ConfigSubentry(
+            data=MappingProxyType(
+                {
+                    CONF_VISITOR_ID: visitor_id,
+                    CONF_VISITOR_NAME: name,
+                    CONF_VISITOR_DESCRIPTION: msg["description"].strip(),
+                }
+            ),
+            subentry_type=SUBENTRY_KNOWN_VISITOR,
+            title=name,
+            unique_id=visitor_id,
+        ),
+    )
+    connection.send_result(msg["id"], {"visitor_id": visitor_id})
 
 
 class KnownPhotoUploadView(HomeAssistantView):
@@ -600,11 +673,32 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
             raise RuntimeError("Lovelace resource collection unavailable")
         if hasattr(resources, "loaded") and not resources.loaded:
             await resources.async_load()
+        current = f"{CARD_URL}?v={VERSION}"
         for item in resources.async_items():
-            if str(item.get("url", "")).split("?")[0] == CARD_URL:
+            url = str(item.get("url", ""))
+            if url.split("?")[0] != CARD_URL:
+                continue
+            if url == current:
                 return
+            # The card is served with long-lived cache headers, so the ?v=
+            # query is the only thing busting that cache. Leaving a stale
+            # version here pins browsers to the JS from whichever release
+            # first registered the resource — cards added in later versions
+            # then never appear, and the old file is served indefinitely.
+            item_id = item.get("id")
+            if item_id is None:
+                return
+            await resources.async_update_item(item_id, {"url": current})
+            _LOGGER.info(
+                "Updated Lovelace resource %s to version %s "
+                "(was %s) — a browser refresh may be needed",
+                CARD_URL,
+                VERSION,
+                url,
+            )
+            return
         await resources.async_create_item(
-            {"res_type": "module", "url": f"{CARD_URL}?v={VERSION}"}
+            {"res_type": "module", "url": current}
         )
         _LOGGER.info("Registered Lovelace resource %s", CARD_URL)
     except Exception:  # noqa: BLE001 - YAML-mode dashboards, API changes
@@ -648,6 +742,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         websocket_api.async_register_command(hass, ws_subscribe_alerts)
         websocket_api.async_register_command(hass, ws_list_visitors)
         websocket_api.async_register_command(hass, ws_delete_visitor_photo)
+        websocket_api.async_register_command(hass, ws_add_visitor)
         hass.http.register_view(KnownPhotoUploadView())
         hass.http.register_view(AlertImageView())
         hass.data[DOMAIN]["http_registered"] = True
@@ -663,6 +758,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     known_visitors = _known_visitors(entry)
 
     ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
     pipelines: dict[str, CameraPipeline] = {}
     for sub in entry.subentries.values():
         if sub.subentry_type != SUBENTRY_CAMERA:
@@ -681,10 +777,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pipelines[camera_id] = pipeline
         motion_entities = camera_conf.get(CONF_MOTION_ENTITIES) or []
         if motion_entities:
+            camera_label = camera_conf.get(CONF_CAMERA_NAME) or camera_id
             _warn_unknown_motion_entities(
+                hass, ent_reg, camera_label, motion_entities
+            )
+            _warn_trigger_device_mismatch(
                 hass,
                 ent_reg,
-                camera_conf.get(CONF_CAMERA_NAME) or camera_id,
+                dev_reg,
+                camera_label,
+                camera_conf.get(CONF_CAMERA_ENTITY),
                 motion_entities,
             )
             entry.async_on_unload(
@@ -785,6 +887,62 @@ def _warn_unknown_motion_entities(
             "when the source integration is updated or the device is renamed.",
             camera_label,
             ", ".join(missing),
+        )
+
+
+@callback
+def _warn_trigger_device_mismatch(
+    hass: HomeAssistant,
+    ent_reg: er.EntityRegistry,
+    dev_reg: dr.DeviceRegistry,
+    camera_label: str,
+    camera_entity: str | None,
+    motion_entities: list[str],
+) -> None:
+    """Warn when a motion trigger belongs to a different device than the camera.
+
+    Cameras of the same model usually share a device name, so Home Assistant
+    disambiguates their entity ids with numeric suffixes (``..._motion_2``,
+    ``..._person_3``). Picking the wrong one is easy and completely silent:
+    every entity resolves, nothing errors, and the camera simply never fires
+    for the events you expected — it only wakes for whatever the mis-picked
+    sensor reports.
+
+    Cross-device triggers are legitimate (a separate PIR covering the same
+    view), so this is advisory. Helpers (input_boolean/switch) have no device
+    and are skipped.
+    """
+    if not camera_entity:
+        return
+    source = ent_reg.async_get(camera_entity)
+    if source is None or source.device_id is None:
+        return
+
+    def _device_name(device_id: str) -> str:
+        device = dev_reg.async_get(device_id)
+        if device is None:
+            return "unknown device"
+        return device.name_by_user or device.name or "unnamed device"
+
+    mismatched = [
+        f"{entity_id} (device: {_device_name(entry.device_id)})"
+        for entity_id in motion_entities
+        if (entry := ent_reg.async_get(entity_id)) is not None
+        and entry.device_id is not None
+        and entry.device_id != source.device_id
+    ]
+    if mismatched:
+        _LOGGER.warning(
+            "Camera '%s': motion trigger(s) %s belong to a different device "
+            "than its camera entity %s (device: %s). That is supported — e.g. "
+            "a separate motion sensor covering the same view — but it is also "
+            "what a mis-picked trigger looks like when several cameras share a "
+            "device name. If this camera isn't firing when you expect, check "
+            "its Motion triggers.",
+            camera_label,
+            ", ".join(mismatched),
+            camera_entity,
+            _device_name(source.device_id),
         )
 
 

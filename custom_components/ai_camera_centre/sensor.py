@@ -11,13 +11,24 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CONF_CAMERA_ID, DOMAIN, SUBENTRY_CAMERA
+from .const import (
+    CONF_CAMERA_ID,
+    DOMAIN,
+    SIGNAL_ANALYSIS_FAILED,
+    SUBENTRY_CAMERA,
+)
 from .entity import CameraEntityMixin
 
 
@@ -36,7 +47,11 @@ async def async_setup_entry(
         if pipeline is None:
             continue
         async_add_entities(
-            [CameraAlerts24h(pipeline), CameraLastScore(pipeline)],
+            [
+                CameraAlerts24h(pipeline),
+                CameraLastScore(pipeline),
+                CameraAnalysisFailures(pipeline),
+            ],
             config_subentry_id=subentry_id,
         )
 
@@ -94,6 +109,55 @@ class CameraAlerts24h(CameraEntityMixin, SensorEntity):
     @callback
     def _async_refresh(self, _now) -> None:
         self.async_write_ha_state()
+
+
+class CameraAnalysisFailures(CameraEntityMixin, SensorEntity, RestoreEntity):
+    """Cumulative count of failed analyses for one camera.
+
+    A failure is a provider error, a degraded/blocked response, or a missing
+    score — cases where the pipeline could not produce a real verdict, so the
+    event was effectively unassessed. Exposed as a TOTAL_INCREASING counter so
+    Home Assistant keeps long-term statistics: the failure rate can then be
+    charted per hour/day/week/month from the History/Statistics UI to gauge how
+    often, and when, analyses are going unassessed.
+    """
+
+    _attr_icon = "mdi:image-broken-variant"
+    _attr_native_unit_of_measurement = "failures"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, pipeline) -> None:
+        self._init_camera(pipeline, "analysis_failures")
+        self._attr_name = "Analysis failures"
+        self._count = 0
+
+    async def async_added_to_hass(self) -> None:
+        # Persist across restarts so the counter is continuous; a restart is
+        # otherwise seen by statistics as a meter reset (still handled, but the
+        # running total would drop to 0).
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in (None, "unknown", "unavailable"):
+            try:
+                self._count = int(float(last.state))
+            except (TypeError, ValueError):
+                self._count = 0
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ANALYSIS_FAILED, self._on_failure
+            )
+        )
+
+    @callback
+    def _on_failure(self, camera_id: str) -> None:
+        if camera_id != self._camera_id:
+            return
+        self._count += 1
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> int:
+        return self._count
 
 
 class CameraLastScore(CameraEntityMixin, SensorEntity):
