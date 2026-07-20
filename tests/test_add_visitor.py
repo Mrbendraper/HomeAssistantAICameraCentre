@@ -55,6 +55,8 @@ async def test_add_visitor_creates_subentry(hass, hass_ws_client) -> None:
     assert visitors[0][CONF_VISITOR_NAME] == "Ben Draper"
     assert visitors[0][CONF_VISITOR_ID] == "ben_draper"
     assert visitors[0][CONF_VISITOR_DESCRIPTION] == "Tall, usually in a blue coat"
+    # Adding a subentry schedules a reload; let it settle before teardown.
+    await hass.async_block_till_done()
 
 
 async def test_duplicate_visitor_is_rejected(hass, hass_ws_client) -> None:
@@ -73,6 +75,7 @@ async def test_duplicate_visitor_is_rejected(hass, hass_ws_client) -> None:
             assert resp["error"]["code"] == "duplicate_visitor"
 
     assert len(_visitors(entry)) == 1
+    await hass.async_block_till_done()
 
 
 async def test_blank_name_is_rejected(hass, hass_ws_client) -> None:
@@ -87,3 +90,4 @@ async def test_blank_name_is_rejected(hass, hass_ws_client) -> None:
     assert not resp["success"]
     assert resp["error"]["code"] == "invalid_name"
     assert _visitors(entry) == []
+    await hass.async_block_till_done()

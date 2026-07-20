@@ -16,6 +16,16 @@ All notable changes to AI Camera Centre. Versions follow the
   `known_visitor` subentry the config flow does, so both routes are equivalent
   and names still de-duplicate.
 
+### Fixed
+- **Websocket handlers failed during a config-entry reload.** Adding or editing
+  a subentry reloads the entry, which clears the cached runtime data those
+  handlers read the config entry from. Anything arriving in that window failed:
+  adding two people in quick succession returned "integration not ready", and
+  the card's refresh straight after an add listed no people at all. Handlers
+  that only need the config entry now read it from the config-entry registry,
+  which survives the reload, and the visitor list degrades to omitting photos
+  rather than returning nothing while the store is rebuilding.
+
 ## [2.8.3]
 
 ### Fixed

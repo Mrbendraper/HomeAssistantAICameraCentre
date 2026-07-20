@@ -448,6 +448,18 @@ def _known_visitors(entry: ConfigEntry) -> list[dict[str, str]]:
     return out
 
 
+@callback
+def _config_entry(hass: HomeAssistant) -> ConfigEntry | None:
+    """The single config entry, read straight from the registry.
+
+    ``hass.data[DOMAIN]["entry"]`` is cleared for the duration of a reload —
+    which adding or editing a subentry triggers — so handlers that only need
+    the entry itself (rather than the loaded runtime data) must not depend on
+    it, or they fail for the moment right after a change.
+    """
+    return next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/visitors"})
 @websocket_api.async_response
 async def ws_list_visitors(
@@ -456,13 +468,17 @@ async def ws_list_visitors(
     msg: dict[str, Any],
 ) -> None:
     """Return known visitors and their reference-photo URLs for the card."""
-    data = hass.data.get(DOMAIN, {})
-    store: AlertStore | None = data.get("store")
-    entry: ConfigEntry | None = data.get("entry")
-    if store is None or entry is None:
+    store: AlertStore | None = hass.data.get(DOMAIN, {}).get("store")
+    entry = _config_entry(hass)
+    if entry is None:
         connection.send_result(msg["id"], {"visitors": []})
         return
-    photo_map = await hass.async_add_executor_job(store.known_photos_map)
+    # The store is briefly unavailable while the entry reloads — which is
+    # exactly when the card refreshes after adding someone. List the people
+    # regardless; their photos appear on the next refresh.
+    photo_map = (
+        await hass.async_add_executor_job(store.known_photos_map) if store else {}
+    )
     visitors = [
         {
             **v,
@@ -531,9 +547,13 @@ async def ws_add_visitor(
     same place their photos are managed, instead of sending the user to the
     integration page and back.
     """
-    entry: ConfigEntry | None = hass.data.get(DOMAIN, {}).get("entry")
+    # Deliberately not hass.data: adding a subentry reloads the entry, so two
+    # adds in quick succession would find the runtime data missing.
+    entry = _config_entry(hass)
     if entry is None:
-        connection.send_error(msg["id"], "not_ready", "Integration not ready")
+        connection.send_error(
+            msg["id"], "not_ready", "Integration not configured"
+        )
         return
     name = msg["name"].strip()
     visitor_id = slugify(name)
